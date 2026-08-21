@@ -1,0 +1,73 @@
+[
+  {
+    "schemaVersion": "humanv1.plan/1",
+    "planId": "plan_two_week_fixture",
+    "title": "Two-Week Hybrid Fixture",
+    "description": "Synthetic plan for calendar and immutable-version acceptance.",
+    "startDate": "2026-09-07",
+    "endDate": "2026-09-20",
+    "timezone": "Europe/London",
+    "weeks": [
+      {
+        "weekId": "plan_week_01",
+        "weekNumber": 1,
+        "label": "Foundation",
+        "placements": [
+          {
+            "placementId": "placement_strength_w1",
+            "dayOfWeek": 1,
+            "workoutId": "workout_strength_fixture",
+            "workoutVersionId": "workout_strength_fixture_v1",
+            "preferredMinuteOfDay": 540,
+            "reminderEnabled": true,
+            "notes": ""
+          },
+          {
+            "placementId": "placement_tabata_w1",
+            "dayOfWeek": 3,
+            "workoutId": "workout_tabata_fixture",
+            "workoutVersionId": "workout_tabata_fixture_v1",
+            "preferredMinuteOfDay": 1080,
+            "reminderEnabled": false,
+            "notes": ""
+          },
+          {
+            "placementId": "placement_hybrid_w1",
+            "dayOfWeek": 6,
+            "workoutId": "workout_hybrid_fixture",
+            "workoutVersionId": "workout_hybrid_fixture_v1",
+            "preferredMinuteOfDay": null,
+            "reminderEnabled": false,
+            "notes": ""
+          }
+        ]
+      },
+      {
+        "weekId": "plan_week_02",
+        "weekNumber": 2,
+        "label": "Repeat and review",
+        "placements": [
+          {
+            "placementId": "placement_strength_w2",
+            "dayOfWeek": 1,
+            "workoutId": "workout_strength_fixture",
+            "workoutVersionId": "workout_strength_fixture_v1",
+            "preferredMinuteOfDay": 540,
+            "reminderEnabled": true,
+            "notes": ""
+          },
+          {
+            "placementId": "placement_circuit_w2",
+            "dayOfWeek": 4,
+            "workoutId": "workout_circuit_fixture",
+            "workoutVersionId": "workout_circuit_fixture_v1",
+            "preferredMinuteOfDay": 1110,
+            "reminderEnabled": true,
+            "notes": ""
+          }
+        ]
+      }
+    ],
+    "notes": "Fixture only; not a training recommendation."
+  }
+]

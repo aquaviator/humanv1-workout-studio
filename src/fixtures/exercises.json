@@ -1,0 +1,132 @@
+[
+  {
+    "exerciseId": "bench_press",
+    "name": "Bench Press",
+    "aliases": ["Barbell Bench Press"],
+    "category": "Strength",
+    "equipment": ["Barbell", "Bench"],
+    "metricProfile": {
+      "primary": ["repetition_count", "external_load"],
+      "secondary": [],
+      "optional": ["rpe", "rir", "tempo"],
+      "unsupported": ["distance", "elevation_gain"]
+    }
+  },
+  {
+    "exerciseId": "assisted_pull_up",
+    "name": "Assisted Pull-Up",
+    "aliases": ["Assisted Chin-Up"],
+    "category": "Strength",
+    "equipment": ["Assisted Pull-Up Machine"],
+    "metricProfile": {
+      "primary": ["repetition_count", "assistance"],
+      "secondary": [],
+      "optional": ["rpe", "tempo"],
+      "unsupported": ["external_load", "distance"]
+    }
+  },
+  {
+    "exerciseId": "plank",
+    "name": "Plank",
+    "aliases": ["Forearm Plank"],
+    "category": "Isometric",
+    "equipment": ["Bodyweight"],
+    "metricProfile": {
+      "primary": ["duration"],
+      "secondary": [],
+      "optional": ["rpe"],
+      "unsupported": ["repetition_count", "distance"]
+    }
+  },
+  {
+    "exerciseId": "farmers_carry",
+    "name": "Farmer's Carry",
+    "aliases": ["Farmer Walk"],
+    "category": "Carry",
+    "equipment": ["Dumbbell", "Kettlebell"],
+    "metricProfile": {
+      "primary": ["distance", "external_load"],
+      "secondary": ["duration"],
+      "optional": ["rpe", "side"],
+      "unsupported": ["assistance"]
+    }
+  },
+  {
+    "exerciseId": "treadmill_run",
+    "name": "Treadmill Run",
+    "aliases": ["Treadmill Running"],
+    "category": "Cardio",
+    "equipment": ["Treadmill"],
+    "metricProfile": {
+      "primary": ["duration", "distance"],
+      "secondary": ["pace", "speed"],
+      "optional": ["incline_percent", "heart_rate", "rpe", "energy"],
+      "unsupported": ["repetition_count", "external_load"]
+    }
+  },
+  {
+    "exerciseId": "stair_climber",
+    "name": "Stair Climber",
+    "aliases": ["Stepmill", "Stair Machine"],
+    "category": "Cardio",
+    "equipment": ["Stair Climber"],
+    "metricProfile": {
+      "primary": ["duration", "step_count"],
+      "secondary": ["elevation_gain"],
+      "optional": ["cadence", "manufacturer_level", "heart_rate", "rpe"],
+      "unsupported": ["external_load"]
+    }
+  },
+  {
+    "exerciseId": "rowing_machine_cardio",
+    "name": "Rowing Machine",
+    "aliases": ["Indoor Rower", "RowErg"],
+    "category": "Cardio",
+    "equipment": ["Rowing Machine"],
+    "metricProfile": {
+      "primary": ["duration", "distance"],
+      "secondary": [],
+      "optional": ["pace", "mechanical_power", "stroke_rate", "drag_factor", "heart_rate", "rpe"],
+      "unsupported": ["external_load"]
+    }
+  },
+  {
+    "exerciseId": "air_bike",
+    "name": "Air Bike",
+    "aliases": ["Assault Bike", "Fan Bike"],
+    "category": "Cardio",
+    "equipment": ["Air Bike"],
+    "metricProfile": {
+      "primary": ["duration"],
+      "secondary": ["distance"],
+      "optional": ["mechanical_power", "cadence", "energy", "heart_rate", "rpe"],
+      "unsupported": ["external_load"]
+    }
+  },
+  {
+    "exerciseId": "jump_rope",
+    "name": "Jump Rope",
+    "aliases": ["Skipping Rope"],
+    "category": "HIIT",
+    "equipment": ["Jump Rope"],
+    "metricProfile": {
+      "primary": ["repetition_count", "duration"],
+      "secondary": [],
+      "optional": ["cadence", "rpe"],
+      "unsupported": ["distance", "external_load"]
+    }
+  },
+  {
+    "exerciseId": "romanian_deadlift",
+    "name": "Romanian Deadlift",
+    "aliases": ["RDL"],
+    "category": "Strength",
+    "equipment": ["Barbell", "Dumbbell"],
+    "metricProfile": {
+      "primary": ["repetition_count", "external_load"],
+      "secondary": [],
+      "optional": ["rpe", "rir", "tempo"],
+      "unsupported": ["distance"]
+    }
+  }
+]

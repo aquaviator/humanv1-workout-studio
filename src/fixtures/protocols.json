@@ -1,0 +1,86 @@
+[
+  {
+    "schemaVersion": "humanv1.protocol/1",
+    "protocolId": "protocol_tabata_20_10_8",
+    "title": "Tabata 20/10 × 8",
+    "summary": "Eight repetitions of 20 seconds of work and 10 seconds of recovery.",
+    "protocolType": "TABATA",
+    "status": "PUBLISHED",
+    "suitability": ["HIIT", "CARDIO", "CIRCUIT"],
+    "equipmentCapabilityKeys": [],
+    "populationNotes": "Scale exercise selection and intensity to the participant.",
+    "contraindicationNotes": "High-intensity work may be unsuitable for some populations without appropriate screening.",
+    "progressionNotes": "Progress exercise complexity or achieved output without changing the governed 20/10 structure.",
+    "segments": [
+      {
+        "segmentId": "tabata_work",
+        "phase": "WORK",
+        "durationSeconds": 20,
+        "repeatCount": 8,
+        "targets": [],
+        "exerciseSlotCount": 1,
+        "instructions": "Work at the prescribed effort."
+      },
+      {
+        "segmentId": "tabata_rest",
+        "phase": "REST",
+        "durationSeconds": 10,
+        "repeatCount": 8,
+        "targets": [],
+        "exerciseSlotCount": 0,
+        "instructions": "Recover for the full interval."
+      }
+    ],
+    "evidence": []
+  },
+  {
+    "schemaVersion": "humanv1.protocol/1",
+    "protocolId": "protocol_aerobic_4x4_fixture",
+    "title": "Four-by-Four Aerobic Intervals — Fixture",
+    "summary": "Synthetic development fixture containing repeated work and recovery segments.",
+    "protocolType": "AEROBIC_INTERVAL",
+    "status": "DRAFT",
+    "suitability": ["HIIT", "CARDIO"],
+    "equipmentCapabilityKeys": ["duration", "heart_rate"],
+    "populationNotes": "Fixture content only; not clinical or coaching advice.",
+    "contraindicationNotes": "Requires specialist editorial review before governance.",
+    "progressionNotes": "No governed progression supplied in this fixture.",
+    "segments": [
+      {
+        "segmentId": "fixture_warm_up",
+        "phase": "WARM_UP",
+        "durationSeconds": 600,
+        "repeatCount": 1,
+        "targets": [],
+        "exerciseSlotCount": 1,
+        "instructions": "Progressive warm-up."
+      },
+      {
+        "segmentId": "fixture_work",
+        "phase": "WORK",
+        "durationSeconds": 240,
+        "repeatCount": 4,
+        "targets": [
+          {
+            "metricKey": "rpe",
+            "minimumValue": 7,
+            "maximumValue": 9,
+            "canonicalUnit": "scale_1_10"
+          }
+        ],
+        "exerciseSlotCount": 1,
+        "instructions": "Sustained hard effort."
+      },
+      {
+        "segmentId": "fixture_recovery",
+        "phase": "ACTIVE_RECOVERY",
+        "durationSeconds": 180,
+        "repeatCount": 4,
+        "targets": [],
+        "exerciseSlotCount": 1,
+        "instructions": "Easy active recovery."
+      }
+    ],
+    "evidence": []
+  }
+]

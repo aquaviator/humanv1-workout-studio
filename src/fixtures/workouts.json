@@ -1,0 +1,345 @@
+[
+  {
+    "schemaVersion": "humanv1.workout/1",
+    "workoutId": "workout_strength_fixture",
+    "title": "Strength Builder Fixture",
+    "description": "Synthetic strength workout used for development and acceptance.",
+    "discipline": "STRENGTH",
+    "catalogueReleaseId": "fixture_catalogue_v1",
+    "protocolReleaseId": null,
+    "tags": ["fixture", "strength"],
+    "estimatedDurationSeconds": 2400,
+    "blocks": [
+      {
+        "blockId": "block_bench_press",
+        "type": "EXERCISE",
+        "exerciseId": "bench_press",
+        "exerciseNameSnapshot": "Bench Press",
+        "efforts": [
+          {
+            "effortId": "bench_warmup_01",
+            "effortType": "WARM_UP",
+            "prescriptions": [
+              {
+                "prescriptionId": "bench_warmup_reps",
+                "metricKey": "repetition_count",
+                "targetValue": 10,
+                "canonicalUnit": "count",
+                "position": 0
+              },
+              {
+                "prescriptionId": "bench_warmup_load",
+                "metricKey": "external_load",
+                "targetValue": 40,
+                "canonicalUnit": "kg",
+                "position": 1
+              }
+            ],
+            "restAfterSeconds": 60,
+            "notes": ""
+          },
+          {
+            "effortId": "bench_working_01",
+            "effortType": "WORKING",
+            "prescriptions": [
+              {
+                "prescriptionId": "bench_working_reps",
+                "metricKey": "repetition_count",
+                "minimumValue": 8,
+                "maximumValue": 10,
+                "canonicalUnit": "count",
+                "position": 0
+              },
+              {
+                "prescriptionId": "bench_working_load",
+                "metricKey": "external_load",
+                "targetValue": 70,
+                "canonicalUnit": "kg",
+                "position": 1
+              },
+              {
+                "prescriptionId": "bench_working_rpe",
+                "metricKey": "rpe",
+                "targetValue": 8,
+                "canonicalUnit": "scale_1_10",
+                "position": 2
+              }
+            ],
+            "restAfterSeconds": 120,
+            "notes": "Controlled working set."
+          }
+        ],
+        "notes": "",
+        "substitutionExerciseIds": []
+      },
+      {
+        "blockId": "block_plank",
+        "type": "EXERCISE",
+        "exerciseId": "plank",
+        "exerciseNameSnapshot": "Plank",
+        "efforts": [
+          {
+            "effortId": "plank_timed_01",
+            "effortType": "TIMED",
+            "prescriptions": [
+              {
+                "prescriptionId": "plank_duration_01",
+                "metricKey": "duration",
+                "targetValue": 60,
+                "canonicalUnit": "s",
+                "position": 0
+              }
+            ],
+            "restAfterSeconds": 60,
+            "notes": ""
+          }
+        ],
+        "notes": "",
+        "substitutionExerciseIds": []
+      }
+    ]
+  },
+  {
+    "schemaVersion": "humanv1.workout/1",
+    "workoutId": "workout_tabata_fixture",
+    "title": "Air Bike Tabata Fixture",
+    "description": "Synthetic Tabata composition referencing a governed protocol.",
+    "discipline": "TABATA",
+    "catalogueReleaseId": "fixture_catalogue_v1",
+    "protocolReleaseId": "fixture_protocol_release_v1",
+    "tags": ["fixture", "tabata"],
+    "estimatedDurationSeconds": 240,
+    "blocks": [
+      {
+        "blockId": "tabata_repeat_block",
+        "type": "REPEAT",
+        "repeatCount": 8,
+        "label": "Eight Tabata rounds",
+        "children": [
+          {
+            "blockId": "tabata_work_interval",
+            "type": "INTERVAL",
+            "phase": "WORK",
+            "durationSeconds": 20,
+            "children": [
+              {
+                "blockId": "tabata_air_bike",
+                "type": "EXERCISE",
+                "exerciseId": "air_bike",
+                "exerciseNameSnapshot": "Air Bike",
+                "efforts": [
+                  {
+                    "effortId": "tabata_air_bike_effort",
+                    "effortType": "TIMED",
+                    "prescriptions": [
+                      {
+                        "prescriptionId": "tabata_air_bike_duration",
+                        "metricKey": "duration",
+                        "targetValue": 20,
+                        "canonicalUnit": "s",
+                        "position": 0
+                      }
+                    ],
+                    "restAfterSeconds": null,
+                    "notes": ""
+                  }
+                ],
+                "notes": "",
+                "substitutionExerciseIds": []
+              }
+            ],
+            "instructions": "Hard but controlled work."
+          },
+          {
+            "blockId": "tabata_rest_interval",
+            "type": "REST",
+            "durationSeconds": 10,
+            "recoveryType": "PASSIVE",
+            "instructions": "Recover."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "schemaVersion": "humanv1.workout/1",
+    "workoutId": "workout_circuit_fixture",
+    "title": "Instructor Circuit Fixture",
+    "description": "Mixed station circuit demonstrating application-neutral exercise selection.",
+    "discipline": "CIRCUIT",
+    "catalogueReleaseId": "fixture_catalogue_v1",
+    "protocolReleaseId": null,
+    "tags": ["fixture", "circuit"],
+    "estimatedDurationSeconds": 1800,
+    "blocks": [
+      {
+        "blockId": "mixed_circuit_block",
+        "type": "CIRCUIT",
+        "rounds": 4,
+        "stationTransitionSeconds": 15,
+        "roundRecoverySeconds": 90,
+        "stations": [
+          {
+            "blockId": "station_air_bike",
+            "type": "EXERCISE",
+            "exerciseId": "air_bike",
+            "exerciseNameSnapshot": "Air Bike",
+            "efforts": [
+              {
+                "effortId": "station_air_bike_effort",
+                "effortType": "TIMED",
+                "prescriptions": [
+                  {
+                    "prescriptionId": "station_air_bike_duration",
+                    "metricKey": "duration",
+                    "targetValue": 45,
+                    "canonicalUnit": "s",
+                    "position": 0
+                  }
+                ],
+                "restAfterSeconds": null,
+                "notes": ""
+              }
+            ],
+            "notes": "",
+            "substitutionExerciseIds": []
+          },
+          {
+            "blockId": "station_bench_press",
+            "type": "EXERCISE",
+            "exerciseId": "bench_press",
+            "exerciseNameSnapshot": "Bench Press",
+            "efforts": [
+              {
+                "effortId": "station_bench_effort",
+                "effortType": "WORKING",
+                "prescriptions": [
+                  {
+                    "prescriptionId": "station_bench_reps",
+                    "metricKey": "repetition_count",
+                    "targetValue": 10,
+                    "canonicalUnit": "count",
+                    "position": 0
+                  }
+                ],
+                "restAfterSeconds": null,
+                "notes": ""
+              }
+            ],
+            "notes": "",
+            "substitutionExerciseIds": []
+          },
+          {
+            "blockId": "station_farmers_carry",
+            "type": "EXERCISE",
+            "exerciseId": "farmers_carry",
+            "exerciseNameSnapshot": "Farmer's Carry",
+            "efforts": [
+              {
+                "effortId": "station_carry_effort",
+                "effortType": "DISTANCE",
+                "prescriptions": [
+                  {
+                    "prescriptionId": "station_carry_distance",
+                    "metricKey": "distance",
+                    "targetValue": 30,
+                    "canonicalUnit": "m",
+                    "position": 0
+                  },
+                  {
+                    "prescriptionId": "station_carry_load",
+                    "metricKey": "external_load",
+                    "targetValue": 32,
+                    "canonicalUnit": "kg",
+                    "position": 1
+                  }
+                ],
+                "restAfterSeconds": null,
+                "notes": ""
+              }
+            ],
+            "notes": "",
+            "substitutionExerciseIds": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "schemaVersion": "humanv1.workout/1",
+    "workoutId": "workout_hybrid_fixture",
+    "title": "Back and Treadmill Hybrid Fixture",
+    "description": "Strength work followed by a timed treadmill interval.",
+    "discipline": "HYBRID",
+    "catalogueReleaseId": "fixture_catalogue_v1",
+    "protocolReleaseId": null,
+    "tags": ["fixture", "hybrid"],
+    "estimatedDurationSeconds": 2100,
+    "blocks": [
+      {
+        "blockId": "hybrid_rdl_block",
+        "type": "EXERCISE",
+        "exerciseId": "romanian_deadlift",
+        "exerciseNameSnapshot": "Romanian Deadlift",
+        "efforts": [
+          {
+            "effortId": "hybrid_rdl_effort",
+            "effortType": "WORKING",
+            "prescriptions": [
+              {
+                "prescriptionId": "hybrid_rdl_reps",
+                "metricKey": "repetition_count",
+                "targetValue": 8,
+                "canonicalUnit": "count",
+                "position": 0
+              },
+              {
+                "prescriptionId": "hybrid_rdl_load",
+                "metricKey": "external_load",
+                "targetValue": 80,
+                "canonicalUnit": "kg",
+                "position": 1
+              }
+            ],
+            "restAfterSeconds": 120,
+            "notes": ""
+          }
+        ],
+        "notes": "",
+        "substitutionExerciseIds": []
+      },
+      {
+        "blockId": "hybrid_treadmill_block",
+        "type": "EXERCISE",
+        "exerciseId": "treadmill_run",
+        "exerciseNameSnapshot": "Treadmill Run",
+        "efforts": [
+          {
+            "effortId": "hybrid_treadmill_effort",
+            "effortType": "TIMED",
+            "prescriptions": [
+              {
+                "prescriptionId": "hybrid_treadmill_duration",
+                "metricKey": "duration",
+                "targetValue": 600,
+                "canonicalUnit": "s",
+                "position": 0
+              },
+              {
+                "prescriptionId": "hybrid_treadmill_incline",
+                "metricKey": "incline_percent",
+                "targetValue": 5,
+                "canonicalUnit": "percent",
+                "position": 1
+              }
+            ],
+            "restAfterSeconds": null,
+            "notes": ""
+          }
+        ],
+        "notes": "",
+        "substitutionExerciseIds": []
+      }
+    ]
+  }
+]
