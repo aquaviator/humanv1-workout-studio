@@ -3,19 +3,22 @@ import { DraftRepository } from '../DraftRepository';
 import { get, set, del } from 'idb-keyval';
 import { Workout } from '../../domain/types';
 
+const { mockDbStore } = vi.hoisted(() => {
+  return { mockDbStore: new Map() };
+});
+
 vi.mock('idb-keyval', () => {
-  const store = new Map();
   return {
-    get: vi.fn(key => Promise.resolve(store.get(key))),
+    get: vi.fn(key => Promise.resolve(mockDbStore.get(key))),
     set: vi.fn((key, val) => {
-      store.set(key, val);
+      mockDbStore.set(key, val);
       return Promise.resolve();
     }),
+    keys: vi.fn(() => Promise.resolve(Array.from(mockDbStore.keys()))),
     del: vi.fn(key => {
-      store.delete(key);
+      mockDbStore.delete(key);
       return Promise.resolve();
     }),
-    _store: store
   };
 });
 
@@ -24,9 +27,7 @@ describe('DraftRepository', () => {
 
   beforeEach(async () => {
     repo = new DraftRepository();
-    // @ts-ignore
-    const store = (await import('idb-keyval'))._store;
-    if (store) store.clear();
+    mockDbStore.clear();
   });
 
   it('saves and retrieves a workout draft', async () => {

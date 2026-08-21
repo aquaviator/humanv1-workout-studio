@@ -64,3 +64,66 @@ export interface Workout {
   estimatedDurationSeconds?: number;
   blocks: Block[];
 }
+
+export interface ProtocolSegmentTarget {
+  metricKey: string;
+  minimumValue?: number;
+  maximumValue?: number;
+  targetValue?: number;
+  canonicalUnit: string;
+}
+
+export interface ProtocolSegment {
+  segmentId: StableId;
+  phase: "WARM_UP" | "WORK" | "REST" | "ACTIVE_RECOVERY" | "COOL_DOWN" | "PREP" | "TRANSITION" | "COOLDOWN";
+  durationSeconds: number;
+  repeatCount: number;
+  targets: ProtocolSegmentTarget[];
+  exerciseSlotCount: number;
+  instructions: string;
+}
+
+export interface Protocol {
+  schemaVersion: string;
+  protocolId: StableId;
+  title: string;
+  summary: string;
+  protocolType: string;
+  status: "DRAFT" | "PUBLISHED";
+  suitability: string[];
+  equipmentCapabilityKeys: string[];
+  populationNotes?: string;
+  contraindicationNotes?: string;
+  progressionNotes?: string;
+  segments: ProtocolSegment[];
+  evidence: string[];
+}
+
+export interface PlanPlacement {
+  placementId: StableId;
+  dayOfWeek: number;
+  workoutId: StableId;
+  workoutVersionId: StableId;
+  preferredMinuteOfDay: number | null;
+  reminderEnabled: boolean;
+  notes: string;
+}
+
+export interface PlanWeek {
+  weekId: StableId;
+  weekNumber: number;
+  label: string;
+  placements: PlanPlacement[];
+}
+
+export interface Plan {
+  schemaVersion: string;
+  planId: StableId;
+  title: string;
+  description: string;
+  startDate?: string;
+  endDate?: string;
+  timezone?: string;
+  weeks: PlanWeek[];
+  notes?: string;
+}

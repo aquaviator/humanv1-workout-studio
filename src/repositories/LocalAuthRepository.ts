@@ -14,7 +14,9 @@ export class LocalAuthRepository implements AuthRepository {
 
   constructor() {
     if (import.meta.env.VITE_DEV_MODE !== 'true') {
-      console.error('LocalAuthRepository should only be used in development.');
+      localStorage.removeItem(STORAGE_KEY);
+      this.identity = null;
+      return;
     }
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {

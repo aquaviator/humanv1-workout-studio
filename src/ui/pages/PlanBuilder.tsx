@@ -8,11 +8,12 @@ import { Dumbbell, Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
+import { Plan } from "../../domain/types";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [planId] = useState(() => uuidv4());
   
-  const initialPlan = {
+  const initialPlan: Plan = {
     ...plansData[0],
     planId,
     title: "New Plan",
@@ -24,9 +25,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     }]
   };
 
-  const { state: plan, set: setPlan, undo, redo, canUndo, canRedo } = useHistory(initialPlan);
+  const { state: plan, set: setPlan, reset, undo, redo, canUndo, canRedo } = useHistory<Plan>(initialPlan);
   const [availableWorkouts] = useState(workoutsData);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
+  const [isLoading, setIsLoading] = useState(true);
   
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -34,15 +36,28 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const days = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
 
   useEffect(() => {
+    let mounted = true;
+    draftRepository.listPlanDrafts(identity.humanUserId).then((drafts) => {
+      if (!mounted) return;
+      if (drafts.length > 0) {
+        reset(drafts[0]);
+      }
+      setIsLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [identity.humanUserId, reset]);
+
+  useEffect(() => {
+    if (isLoading) return;
     let timeout: ReturnType<typeof setTimeout>;
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
-      // Assuming plan model has same structure as workout model conceptually, save to a separate draft store if needed. 
-      // For now we'll simulate saving.
-      setSaveStatus("Saved");
+      draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => {
+        setSaveStatus("Saved");
+      });
     }, 1000);
     return () => clearTimeout(timeout);
-  }, [plan, identity.humanUserId]);
+  }, [plan, identity.humanUserId, isLoading]);
 
   const onDragEnd = (result: DropResult) => {
     const { source, destination } = result;
@@ -149,10 +164,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         </div>
       </div>
       
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        {/* Calendar Grid */}
-        <div className="flex-1 p-4 md:p-8 overflow-y-auto">
-          <DragDropContext onDragEnd={onDragEnd}>
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          {/* Calendar Grid */}
+          <div className="flex-1 p-4 md:p-8 overflow-y-auto">
             <div className="flex flex-col md:flex-row gap-4 overflow-x-auto pb-4">
               {days.map((day, idx) => {
                 const dayOfWeekNumber = day.getDay() === 0 ? 7 : day.getDay();
@@ -207,50 +222,52 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                 );
               })}
             </div>
-          </DragDropContext>
-        </div>
-        
-        {/* Workout Library Sidebar */}
-        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-hv-border bg-hv-surface-1 p-4 flex flex-col h-64 md:h-auto">
-          <h2 className="font-bold mb-4">Library</h2>
-          <div className="flex-1 overflow-y-auto space-y-2">
-            <Droppable droppableId="library" isDropDisabled={true}>
-              {(provided) => (
-                <div ref={provided.innerRef} {...provided.droppableProps}>
-                  {availableWorkouts.map((workout, index) => (
-                    <Draggable key={workout.workoutId} draggableId={workout.workoutId} index={index}>
-                      {(provided) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          {...provided.dragHandleProps}
-                          className="bg-hv-bg border border-hv-border p-3 rounded-md mb-2 cursor-grab flex items-center justify-between gap-3 group"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Dumbbell className="w-4 h-4 text-hv-text-muted hidden md:block" />
-                            <div>
-                              <div className="font-semibold text-sm line-clamp-1">{workout.title}</div>
-                              <div className="text-xs text-hv-text-muted">{workout.discipline}</div>
+          </div>
+          
+          {/* Workout Library Sidebar */}
+          <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-hv-border bg-hv-surface-1 p-4 flex flex-col h-64 md:h-auto">
+            <h2 className="font-bold mb-4">Library</h2>
+            <div className="flex-1 overflow-y-auto space-y-2">
+              <Droppable droppableId="library" isDropDisabled={true}>
+                {(provided) => (
+                  <div ref={provided.innerRef} {...provided.droppableProps}>
+                    {availableWorkouts.map((workout, index) => (
+                      <Draggable key={workout.workoutId} draggableId={workout.workoutId} index={index}>
+                        {(provided) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            className="bg-hv-bg border border-hv-border p-3 rounded-md mb-2 flex items-center justify-between gap-3 group"
+                          >
+                            <div 
+                              {...provided.dragHandleProps} 
+                              className="flex-1 flex items-center gap-3 cursor-grab"
+                            >
+                              <Dumbbell className="w-4 h-4 text-hv-text-muted hidden md:block" />
+                              <div>
+                                <div className="font-semibold text-sm line-clamp-1">{workout.title}</div>
+                                <div className="text-xs text-hv-text-muted">{workout.discipline}</div>
+                              </div>
+                            </div>
+                            
+                            {/* Mobile-friendly Add buttons when drag is hard */}
+                            <div className="hidden group-hover:flex md:hidden gap-1">
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 1)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Monday">Mon</button>
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 3)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Wednesday">Wed</button>
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 5)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Friday">Fri</button>
                             </div>
                           </div>
-                          
-                          {/* Mobile-friendly Add buttons when drag is hard */}
-                          <div className="hidden group-hover:flex md:hidden gap-1">
-                            <button onClick={() => addWorkoutToDay(workout.workoutId, 1)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Monday">Mon</button>
-                            <button onClick={() => addWorkoutToDay(workout.workoutId, 3)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Wednesday">Wed</button>
-                            <button onClick={() => addWorkoutToDay(workout.workoutId, 5)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Friday">Fri</button>
-                          </div>
-                        </div>
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </div>
           </div>
         </div>
-      </div>
+      </DragDropContext>
     </div>
   );
 }

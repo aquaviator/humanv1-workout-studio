@@ -21,9 +21,15 @@ export function useHistory<T>(initialState: T) {
     setPointer((prev) => Math.min(history.length - 1, prev + 1));
   }, [history.length]);
 
+  const reset = useCallback((newState: T) => {
+    setHistory([newState]);
+    setPointer(0);
+  }, []);
+
   return {
     state: history[pointer],
     set,
+    reset,
     undo,
     redo,
     canUndo: pointer > 0,

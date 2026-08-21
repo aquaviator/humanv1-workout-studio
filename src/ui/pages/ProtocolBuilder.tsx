@@ -1,60 +1,84 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Protocol } from "../../domain/types";
+import { Protocol, ProtocolSegment } from "../../domain/types";
 import { Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
+import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
 
 export default function ProtocolBuilder({ identity }: { identity: HumanIdentity }) {
   const [protocolId] = useState(() => uuidv4());
   
-  const { state: protocol, set: setProtocol, undo, redo, canUndo, canRedo } = useHistory<any>({
+  const initialProtocol: Protocol = {
     protocolId,
     schemaVersion: "humanv1.protocol/1",
     title: "New HIIT Protocol",
     protocolType: "TABATA",
     summary: "",
+    status: "DRAFT",
     suitability: [],
-    tags: [],
-    timeline: {
-      totalDurationSeconds: 240,
-      repeats: 8,
-      segments: [
-        { segmentId: uuidv4(), type: "WORK", durationSeconds: 20 },
-        { segmentId: uuidv4(), type: "RECOVERY", durationSeconds: 10 }
-      ]
-    }
-  });
+    equipmentCapabilityKeys: [],
+    segments: [
+      { segmentId: uuidv4(), phase: "WORK", durationSeconds: 20, repeatCount: 8, exerciseSlotCount: 1, targets: [], instructions: "" },
+      { segmentId: uuidv4(), phase: "REST", durationSeconds: 10, repeatCount: 8, exerciseSlotCount: 0, targets: [], instructions: "" }
+    ],
+    evidence: []
+  };
 
+  const { state: protocol, set: setProtocol, reset, undo, redo, canUndo, canRedo } = useHistory<Protocol>(initialProtocol);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addSegment = (type: "PREP" | "WORK" | "RECOVERY" | "TRANSITION" | "COOLDOWN") => {
+  useEffect(() => {
+    let mounted = true;
+    draftRepository.listProtocolDrafts(identity.humanUserId).then((drafts) => {
+      if (!mounted) return;
+      if (drafts.length > 0) {
+        reset(drafts[0]);
+      }
+      setIsLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [identity.humanUserId, reset]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    let timeout: ReturnType<typeof setTimeout>;
+    setSaveStatus("Saving...");
+    timeout = setTimeout(() => {
+      draftRepository.saveProtocolDraft(identity.humanUserId, protocol).then(() => {
+        setSaveStatus("Saved");
+      });
+    }, 1000);
+    return () => clearTimeout(timeout);
+  }, [protocol, identity.humanUserId, isLoading]);
+
+  const addSegment = (phase: ProtocolSegment["phase"]) => {
     setProtocol({
       ...protocol,
-      timeline: {
-        ...protocol.timeline,
-        segments: [...protocol.timeline.segments, { segmentId: uuidv4(), type, durationSeconds: 30 }]
-      }
+      segments: [...protocol.segments, { 
+        segmentId: uuidv4(), 
+        phase, 
+        durationSeconds: 30, 
+        repeatCount: 1, 
+        exerciseSlotCount: phase === "WORK" ? 1 : 0, 
+        targets: [], 
+        instructions: "" 
+      }]
     });
   };
 
   const removeSegment = (segmentId: string) => {
     setProtocol({
       ...protocol,
-      timeline: {
-        ...protocol.timeline,
-        segments: protocol.timeline.segments.filter((s: any) => s.segmentId !== segmentId)
-      }
+      segments: protocol.segments.filter(s => s.segmentId !== segmentId)
     });
   };
 
-  const updateSegment = (segmentId: string, durationSeconds: number) => {
+  const updateSegment = (segmentId: string, updates: Partial<ProtocolSegment>) => {
     setProtocol({
       ...protocol,
-      timeline: {
-        ...protocol.timeline,
-        segments: protocol.timeline.segments.map((s: any) => s.segmentId === segmentId ? { ...s, durationSeconds } : s)
-      }
+      segments: protocol.segments.map(s => s.segmentId === segmentId ? { ...s, ...updates } : s)
     });
   };
 
@@ -75,6 +99,7 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
             className="bg-hv-surface-2 text-hv-text px-3 py-2 rounded-md outline-none border border-hv-border focus:border-hv-primary mr-4"
             value={protocol.protocolType}
             onChange={(e) => setProtocol({ ...protocol, protocolType: e.target.value })}
+            aria-label="Protocol Type"
           >
             <option value="TABATA">Tabata</option>
             <option value="CIRCUIT">Circuit</option>
@@ -99,55 +124,55 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
       <div className="flex-1 p-4 md:p-8 overflow-y-auto">
         <div className="max-w-2xl mx-auto">
           
-          <div className="flex justify-between items-center bg-hv-surface-1 p-4 rounded-lg border border-hv-border mb-6">
-            <div className="font-semibold text-hv-text-muted">Total Rounds / Repeats</div>
-            <div className="flex items-center gap-2 bg-hv-bg px-3 py-1 rounded border border-hv-border">
-              <input 
-                type="number"
-                className="bg-transparent w-16 text-xl text-center outline-none font-bold"
-                value={protocol.timeline.repeats || 1}
-                onChange={(e) => setProtocol({ ...protocol, timeline: { ...protocol.timeline, repeats: Number(e.target.value) }})}
-              />
-              <span className="text-sm text-hv-text-muted">x</span>
-            </div>
-          </div>
-
           <h2 className="text-xl font-bold mb-4">Timeline Segments</h2>
           
           <div className="space-y-3 mb-8">
-            {protocol.timeline.segments.map((segment: any, index: number) => (
+            {protocol.segments.map((segment, index) => (
               <div key={segment.segmentId} className="flex items-center gap-4 bg-hv-surface-1 border border-hv-border p-4 rounded-lg">
                 <span className="w-6 text-center font-mono text-hv-text-muted">{index + 1}</span>
                 <select 
                   className="bg-transparent text-hv-text font-semibold outline-none w-32 border-b border-transparent focus:border-hv-primary pb-1"
-                  value={segment.type}
-                  onChange={(e) => {
-                    const updated = [...protocol.timeline.segments];
-                    updated[index].type = e.target.value;
-                    setProtocol({ ...protocol, timeline: { ...protocol.timeline, segments: updated } });
-                  }}
+                  value={segment.phase}
+                  onChange={(e) => updateSegment(segment.segmentId, { phase: e.target.value as ProtocolSegment["phase"] })}
+                  aria-label={`Phase for segment ${index + 1}`}
                 >
+                  <option value="WARM_UP">Warm Up</option>
                   <option value="PREP">Prep</option>
                   <option value="WORK">Work</option>
-                  <option value="RECOVERY">Recovery</option>
+                  <option value="REST">Rest</option>
+                  <option value="ACTIVE_RECOVERY">Active Recovery</option>
                   <option value="TRANSITION">Transition</option>
-                  <option value="COOLDOWN">Cooldown</option>
+                  <option value="COOL_DOWN">Cooldown</option>
                 </select>
                 
-                <div className="flex-1 flex justify-end items-center gap-4">
-                  <div className="flex items-center bg-hv-bg rounded px-3 py-2 border border-hv-border focus-within:border-hv-primary">
-                    <input 
-                      type="number"
-                      className="bg-transparent w-16 text-right outline-none font-mono text-lg"
-                      value={segment.durationSeconds}
-                      onChange={(e) => updateSegment(segment.segmentId, Number(e.target.value))}
-                    />
-                    <span className="text-hv-text-muted ml-2">sec</span>
+                <div className="flex flex-col gap-2 flex-1 items-end">
+                  <div className="flex justify-end items-center gap-4 w-full">
+                    <div className="flex items-center bg-hv-bg rounded px-3 py-2 border border-hv-border focus-within:border-hv-primary" title="Repeats">
+                      <input 
+                        type="number"
+                        className="bg-transparent w-10 text-right outline-none font-mono text-lg"
+                        value={segment.repeatCount}
+                        onChange={(e) => updateSegment(segment.segmentId, { repeatCount: Number(e.target.value) })}
+                        aria-label={`Repeats for segment ${index + 1}`}
+                      />
+                      <span className="text-hv-text-muted ml-2">x</span>
+                    </div>
+
+                    <div className="flex items-center bg-hv-bg rounded px-3 py-2 border border-hv-border focus-within:border-hv-primary">
+                      <input 
+                        type="number"
+                        className="bg-transparent w-16 text-right outline-none font-mono text-lg"
+                        value={segment.durationSeconds}
+                        onChange={(e) => updateSegment(segment.segmentId, { durationSeconds: Number(e.target.value) })}
+                        aria-label={`Duration in seconds for segment ${index + 1}`}
+                      />
+                      <span className="text-hv-text-muted ml-2">sec</span>
+                    </div>
+                    
+                    <button onClick={() => removeSegment(segment.segmentId)} className="p-2 text-hv-text-muted hover:text-hv-error" aria-label={`Remove segment ${index + 1}`}>
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
-                  
-                  <button onClick={() => removeSegment(segment.segmentId)} className="p-2 text-hv-text-muted hover:text-hv-error">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
                 </div>
               </div>
             ))}
@@ -157,8 +182,8 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
             <button onClick={() => addSegment('WORK')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2">
               <Plus className="w-4 h-4" /> Work
             </button>
-            <button onClick={() => addSegment('RECOVERY')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Recovery
+            <button onClick={() => addSegment('REST')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Rest
             </button>
             <button onClick={() => addSegment('PREP')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2 text-hv-text-muted">
               <Plus className="w-4 h-4" /> Prep
@@ -166,7 +191,7 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
             <button onClick={() => addSegment('TRANSITION')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2 text-hv-text-muted">
               <Plus className="w-4 h-4" /> Transition
             </button>
-            <button onClick={() => addSegment('COOLDOWN')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2 text-hv-text-muted">
+            <button onClick={() => addSegment('COOL_DOWN')} className="px-4 py-2 bg-hv-surface-2 hover:bg-hv-surface-1 border border-hv-border rounded-md text-sm font-medium flex items-center gap-2 text-hv-text-muted">
               <Plus className="w-4 h-4" /> Cooldown
             </button>
           </div>

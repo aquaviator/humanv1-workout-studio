@@ -11,7 +11,7 @@ import { HumanIdentity } from "../../domain/identity";
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
   const [workoutId] = useState(() => uuidv4());
   
-  const { state: workout, set: setWorkout, undo, redo, canUndo, canRedo } = useHistory<Workout>({
+  const { state: workout, set: setWorkout, reset, undo, redo, canUndo, canRedo } = useHistory<Workout>({
     schemaVersion: "humanv1.workout/1",
     workoutId,
     title: "New Workout",
@@ -23,8 +23,23 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
   const [isExerciseDrawerOpen, setIsExerciseDrawerOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    draftRepository.listWorkoutDrafts(identity.humanUserId).then((drafts) => {
+      if (!mounted) return;
+      if (drafts.length > 0) {
+        // Sort by updatedAt descending (which means we should grab the draft envelope, but since list returns Workout[], we just take the last one or maybe we should just use the first)
+        reset(drafts[0]);
+      }
+      setIsLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [identity.humanUserId, reset]);
+
+  useEffect(() => {
+    if (isLoading) return;
     let timeout: ReturnType<typeof setTimeout>;
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
@@ -209,6 +224,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                                     const updatedBlocks = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, durationSeconds: Number(e.target.value) } : b);
                                     setWorkout({ ...workout, blocks: updatedBlocks as Block[] });
                                   }}
+                                  aria-label="Rest duration in seconds"
                                 />
                                 <span className="text-hv-text-muted ml-1 text-xs select-none">s</span>
                               </div>
@@ -226,6 +242,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                                   const updatedBlocks = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, text: e.target.value } : b);
                                   setWorkout({ ...workout, blocks: updatedBlocks as Block[] });
                                 }}
+                                aria-label="Note block text"
                               />
                             </div>
                           )}
@@ -243,6 +260,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                                       const updatedBlocks = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, efforts: updatedEfforts } : b);
                                       setWorkout({ ...workout, blocks: updatedBlocks as Block[] });
                                     }}
+                                    aria-label={`Effort ${eIdx + 1} type`}
                                   >
                                     <option value="WARM_UP">Warm Up</option>
                                     <option value="WORKING">Working</option>

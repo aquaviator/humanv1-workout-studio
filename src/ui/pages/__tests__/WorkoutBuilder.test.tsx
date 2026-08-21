@@ -6,21 +6,24 @@ import { HumanIdentity } from '../../../domain/identity';
 
 const mockIdentity: HumanIdentity = {
   humanUserId: 'test-user',
-  canonicalEmail: 'test@humanv1.com',
+  email: 'test@humanv1.com',
   displayName: 'Test User'
 };
 
-// Mock idb-keyval to avoid indexDB issues in jsdom
+const { mockDbStore } = vi.hoisted(() => {
+  return { mockDbStore: new Map() };
+});
+
 vi.mock('idb-keyval', () => {
-  const store = new Map();
   return {
-    get: vi.fn(key => Promise.resolve(store.get(key))),
+    get: vi.fn(key => Promise.resolve(mockDbStore.get(key))),
     set: vi.fn((key, val) => {
-      store.set(key, val);
+      mockDbStore.set(key, val);
       return Promise.resolve();
     }),
+    keys: vi.fn(() => Promise.resolve(Array.from(mockDbStore.keys()))),
     del: vi.fn(key => {
-      store.delete(key);
+      mockDbStore.delete(key);
       return Promise.resolve();
     }),
   };
