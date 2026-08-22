@@ -3,6 +3,6 @@ import { LocalAuthRepository } from './LocalAuthRepository';
 import { FirebaseAuthRepository } from './FirebaseAuthRepository';
 import { env } from '../config/env';
 
-export const authRepository: AuthRepository = env.isDev && !env.useEmulator 
+export const authRepository: AuthRepository = env.isDev 
   ? new LocalAuthRepository() 
   : new FirebaseAuthRepository();

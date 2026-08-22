@@ -7,15 +7,11 @@ service cloud.firestore {
     }
     
     function getHumanIdentityDoc() {
-      return get(/databases/$(database)/documents/user_identities/$(request.auth.uid));
-    }
-
-    function getHumanIdentity() {
-      return getHumanIdentityDoc().data.humanUserId;
+      return exists(/databases/$(database)/documents/user_identities/$(request.auth.uid)) ? get(/databases/$(database)/documents/user_identities/$(request.auth.uid)) : null;
     }
     
     function isOwner(humanUserId) {
-      return isAuthenticated() && getHumanIdentityDoc() != null && getHumanIdentity() == humanUserId;
+      return isAuthenticated() && getHumanIdentityDoc() != null && getHumanIdentityDoc().data.humanUserId == humanUserId;
     }
 
     // 1. Trusted identity vulnerability

@@ -1,7 +1,7 @@
-import { get, set, keys } from 'idb-keyval';
+import { get, set, keys, setMany } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
 import { db } from '../config/firebase';
-import { doc, runTransaction } from 'firebase/firestore';
+import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
 
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
 
@@ -52,6 +52,40 @@ export class SyncManager {
     }
   }
 
+  async syncDown(humanUserId: string, types: ('workout' | 'plan' | 'protocol')[] = ['workout', 'plan', 'protocol']): Promise<void> {
+    if (!this.isOnline) return;
+
+    for (const type of types) {
+      const q = query(collection(db, 'humans', humanUserId, `${type}s`));
+      const snap = await getDocs(q);
+      
+      const localPrefix = `drafts_${humanUserId}_${type}_`;
+      const setOps: [string, any][] = [];
+      
+      for (const doc of snap.docs) {
+        const remoteData = doc.data() as DraftEnvelope<any>;
+        const localKey = `${localPrefix}${remoteData.globalId}`;
+        const localData = await get<DraftEnvelope<any>>(localKey);
+        
+        // Exact revision handling, Replay protection
+        if (!localData || remoteData.revision > localData.revision) {
+          setOps.push([localKey, remoteData]);
+          
+          const syncKey = `sync_${humanUserId}_${type}_${remoteData.globalId}`;
+          const syncRecord = await get<SyncRecord>(syncKey);
+          if (syncRecord && syncRecord.envelope.revision < remoteData.revision) {
+             syncRecord.status = 'SYNCED';
+             setOps.push([syncKey, syncRecord]);
+          }
+        }
+      }
+      
+      if (setOps.length > 0) {
+        await setMany(setOps); // Transactional local application
+      }
+    }
+  }
+
   private async uploadRecord(key: string, record: SyncRecord) {
     const { envelope, type } = record;
     const docRef = doc(db, 'humans', envelope.humanUserId, `${type}s`, envelope.globalId);
@@ -80,6 +114,7 @@ export class SyncManager {
       record.status = 'SYNCED';
       await set(key, record);
     } catch (e: any) {
+      console.error("Sync upload failed", e);
       if (e.message === 'REVISION_CONFLICT' || e.message === 'OWNERSHIP_CONFLICT') {
         record.status = 'CONFLICT';
         await set(key, record);

@@ -19,7 +19,7 @@ describe('LocalAuthRepository', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ humanUserId: 'hacked' }));
     
     const repo = new LocalAuthRepository();
-    expect(repo.getCurrentIdentity()).resolves.toBeNull();
+    await expect(repo.getCurrentIdentity()).resolves.toBeNull();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull(); // Should remove stored dev identity
     
     await expect(repo.signIn()).rejects.toThrow('Local authentication is disabled outside development environments.');

@@ -1,9 +1,14 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
   "emulators": {
     "auth": {
+      "host": "127.0.0.1",
       "port": 9098
     },
-    "firestore": { "rules": "firestore.rules",
+    "firestore": {
+      "host": "127.0.0.1",
       "port": 8081
     },
     "ui": {

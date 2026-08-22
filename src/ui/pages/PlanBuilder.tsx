@@ -17,11 +17,11 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       setWorkoutsData(data.length > 0 ? data : [
             {
                 workoutId: 'mock-1',
-                title: 'Mock Workout',
-                discipline: 'Run',
-                draftId: 'mock-1',
-                humanUserId: identity.humanUserId,
                 schemaVersion: '1',
+                title: 'Mock Workout',
+                discipline: 'CARDIO',
+                catalogueReleaseId: 'v1',
+                tags: [],
                 blocks: []
             }
         ]);
@@ -30,11 +30,11 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         setWorkoutsData([
             {
                 workoutId: 'mock-1',
-                title: 'Mock Workout',
-                discipline: 'Run',
-                draftId: 'mock-1',
-                humanUserId: identity.humanUserId,
                 schemaVersion: '1',
+                title: 'Mock Workout',
+                discipline: 'CARDIO',
+                catalogueReleaseId: 'v1',
+                tags: [],
                 blocks: []
             }
         ]);

@@ -8,6 +8,9 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 if (env.useEmulator) {
+  if (!env.firebase.projectId.startsWith('demo-')) {
+    throw new Error(`Emulator projects must begin with 'demo-'. Received: ${env.firebase.projectId}`);
+  }
   connectAuthEmulator(auth, `http://${env.emulator.authHost}`);
   const [host, port] = env.emulator.firestoreHost.split(':');
   connectFirestoreEmulator(db, host, parseInt(port, 10));

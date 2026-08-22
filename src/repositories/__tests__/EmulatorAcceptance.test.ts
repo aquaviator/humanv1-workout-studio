@@ -11,6 +11,8 @@ import { auth, db } from '../../config/firebase';
 import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
+import { sha256 } from 'js-sha256';
+
 beforeAll(async () => {
   // Create synthetic users
   try {
@@ -23,9 +25,20 @@ beforeAll(async () => {
   await adminDb.collection('user_identities').doc('auth_2').set({ humanUserId: 'human_2', authUid: 'auth_2', displayName: 'User 2' });
   
   // Seed catalogue
+  const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [], category: '', aliases: [], metricProfile: 'REPS_ONLY' };
+  const mockParsed = {
+    exerciseId: mockExercise.exerciseId,
+    name: mockExercise.name,
+    category: mockExercise.category,
+    equipment: mockExercise.equipment,
+    aliases: mockExercise.aliases,
+    metricProfile: mockExercise.metricProfile
+  };
+  const computedChecksum = sha256(JSON.stringify([mockParsed].sort((a, b) => a.exerciseId.localeCompare(b.exerciseId))));
+  
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
-  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', published: true, validationState: 'VALIDATED', channel: 'PRODUCTION', count: 1, checksum: 'SKIP_CHECKSUM' });
-  await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set({ exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [] });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', published: true, validationState: 'VALIDATED', channel: 'PRODUCTION', count: 1, checksum: computedChecksum });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set(mockExercise);
 });
 
 beforeEach(async () => {
@@ -46,6 +59,7 @@ describe('Emulator Acceptance', () => {
   });
   
   it('Catalogue download and transactional application', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     const catRepo = new FirebaseCatalogueRepository();
     await catRepo.syncCatalogue();
     const ex = await catRepo.getExercises();
@@ -66,6 +80,8 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     const draftRepo = new DraftRepository();
     
+    console.log("Current Auth UID:", auth.currentUser?.uid);
+    
     // Create
     await draftRepo.saveWorkoutDraft('human_1', {
       schemaVersion: "1",
@@ -77,11 +93,9 @@ describe('Emulator Acceptance', () => {
       blocks: []
     });
 
-    // It queues upload. Since we are online, it syncs.
-    await new Promise(r => setTimeout(r, 100)); // wait for sync
+    await syncManager.syncPending(); // Explicitly wait
     
     // Check Firestore
-    
     const remote = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_1'));
     expect(remote.exists()).toBe(true);
     expect(remote.data().payload.title).toBe("My Workout");
@@ -105,7 +119,8 @@ describe('Emulator Acceptance', () => {
       blocks: []
     });
     
-    await new Promise(r => setTimeout(r, 100)); // wait for sync
+    await syncManager.syncPending(); // wait for sync
+    
     // Should be isolated as conflict, remote is still revision 10
     const remote2 = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_1'));
     expect(remote2.data().revision).toBe(10);
