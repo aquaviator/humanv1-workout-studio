@@ -6,17 +6,22 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    function getHumanIdentityDoc() {
+      return get(/databases/$(database)/documents/user_identities/$(request.auth.uid));
+    }
+
     function getHumanIdentity() {
-      return get(/databases/$(database)/documents/user_identities/$(request.auth.uid)).data.humanUserId;
+      return getHumanIdentityDoc().data.humanUserId;
     }
     
     function isOwner(humanUserId) {
-      return isAuthenticated() && getHumanIdentity() == humanUserId;
+      return isAuthenticated() && getHumanIdentityDoc() != null && getHumanIdentity() == humanUserId;
     }
 
+    // 1. Trusted identity vulnerability
     match /user_identities/{authUid} {
       allow read: if isAuthenticated() && request.auth.uid == authUid;
-      allow write: if isAuthenticated() && request.auth.uid == authUid;
+      allow write: if false; // 1. All client writes to trusted identity documents are denied.
     }
 
     match /entitlements/{humanUserId} {
@@ -24,29 +29,78 @@ service cloud.firestore {
       allow write: if false; 
     }
 
-    match /exercise_catalogue/{document=**} {
+    // 3. Correct governed catalogue topology
+    match /exercise_catalogue/current {
       allow read: if isAuthenticated();
-      allow write: if false; 
+      allow write: if false;
+    }
+    match /exercise_catalogue_releases/{releaseId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    match /exercise_catalogue_releases/{releaseId}/exercises/{exerciseId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
     
     match /staging_exercises/{document=**} {
       allow read, write: if false; 
     }
 
-    match /humans/{humanUserId}/{collection}/{itemId} {
-      allow read: if isOwner(humanUserId);
+    // Explicit supported collections
+    match /humans/{humanUserId} {
       
-      allow create: if isOwner(humanUserId)
-                    && request.resource.data.humanUserId == humanUserId
-                    && request.resource.data.schemaVersion is number
-                    && request.resource.data.revision == 1;
+      function validateDoc(data) {
+        return data.humanUserId == humanUserId
+               && data.schemaVersion is string; // Wait, original was number, but standard is string (e.g. "1")
+      }
+      
+      // We will define a helper for mutations
+      function isValidCreate(data) {
+        return isOwner(humanUserId)
+               && validateDoc(data)
+               && data.revision == 1;
+      }
+      
+      function isValidUpdate(data, oldData) {
+        return isOwner(humanUserId)
+               && validateDoc(data)
+               && data.revision > oldData.revision
+               && data.humanUserId == oldData.humanUserId; // Owner fields cannot change
+      }
 
-      allow update: if isOwner(humanUserId)
-                    && request.resource.data.humanUserId == humanUserId
-                    && request.resource.data.schemaVersion is number
-                    && request.resource.data.revision > resource.data.revision;
-                    
-      allow delete: if false; 
+      match /workouts/{itemId} {
+        allow read: if isOwner(humanUserId);
+        allow create: if isValidCreate(request.resource.data);
+        allow update: if isValidUpdate(request.resource.data, resource.data);
+        allow delete: if false; 
+      }
+      match /plans/{itemId} {
+        allow read: if isOwner(humanUserId);
+        allow create: if isValidCreate(request.resource.data);
+        allow update: if isValidUpdate(request.resource.data, resource.data);
+        allow delete: if false; 
+      }
+      match /protocols/{itemId} {
+        allow read: if isOwner(humanUserId);
+        allow create: if isValidCreate(request.resource.data);
+        allow update: if isValidUpdate(request.resource.data, resource.data);
+        allow delete: if false; 
+      }
+      match /commands/{itemId} {
+        allow read: if isOwner(humanUserId);
+        allow create: if isValidCreate(request.resource.data);
+        allow update: if isValidUpdate(request.resource.data, resource.data);
+        allow delete: if false; 
+      }
+      match /acknowledgements/{itemId} {
+        allow read: if isOwner(humanUserId);
+        allow create: if isValidCreate(request.resource.data);
+        allow update: if isValidUpdate(request.resource.data, resource.data);
+        allow delete: if false; 
+      }
+      
+      // Unknown collection names are denied by default since we don't have a match for them.
     }
   }
 }

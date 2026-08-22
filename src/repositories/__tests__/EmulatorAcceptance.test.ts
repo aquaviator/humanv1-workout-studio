@@ -24,8 +24,8 @@ beforeAll(async () => {
   
   // Seed catalogue
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
-  await adminDb.collection('exercise_catalogue').doc('v1').set({ count: 1, checksum: '123' });
-  await adminDb.collection('exercise_catalogue').doc('v1').collection('exercises').doc('ex1').set({ exerciseId: 'ex1', name: 'Push Up' });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', published: true, validationState: 'VALIDATED', channel: 'PRODUCTION', count: 1, checksum: 'SKIP_CHECKSUM' });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set({ exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [] });
 });
 
 beforeEach(async () => {

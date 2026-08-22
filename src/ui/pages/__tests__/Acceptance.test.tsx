@@ -37,6 +37,30 @@ vi.mock('idb-keyval', () => {
   };
 });
 
+vi.mock('../../repositories/DraftRepository', () => ({
+  draftRepository: {
+    listWorkoutDrafts: vi.fn().mockResolvedValue([
+      {
+        workoutId: 'w1',
+        draftId: 'w1',
+        schemaVersion: '1',
+        title: 'Mock Workout',
+        discipline: 'Run',
+        humanUserId: '1',
+        blocks: [],
+      }
+    ]),
+    saveWorkoutDraft: vi.fn().mockResolvedValue(undefined),
+    getWorkoutDraft: vi.fn().mockResolvedValue(null),
+    listProtocolDrafts: vi.fn().mockResolvedValue([]),
+    saveProtocolDraft: vi.fn().mockResolvedValue(undefined),
+    getProtocolDraft: vi.fn().mockResolvedValue(null),
+    listPlanDrafts: vi.fn().mockResolvedValue([]),
+    savePlanDraft: vi.fn().mockResolvedValue(undefined),
+    getPlanDraft: vi.fn().mockResolvedValue(null),
+  }
+}));
+
 describe('Acceptance Criteria', () => {
   beforeEach(async () => {
     // Seed draft repo with fixtures for tests
@@ -140,6 +164,9 @@ describe('Acceptance Criteria', () => {
       fireEvent.change(titleInput, { target: { value: 'My Epic Plan' } });
       
       // Mobile-friendly Add buttons (keyboard accessible alternatives to drag and drop)
+      await waitFor(() => {
+        expect(screen.queryAllByLabelText('Add to Monday').length).toBeGreaterThan(0);
+      });
       const addButtons = await screen.findAllByLabelText('Add to Monday');
       fireEvent.click(addButtons[0]);
       

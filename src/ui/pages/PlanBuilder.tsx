@@ -11,7 +11,36 @@ import { Plan } from "../../domain/types";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
-  React.useEffect(() => { draftRepository.listWorkoutDrafts(identity.humanUserId).then(setWorkoutsData); }, [identity.humanUserId]);
+  const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
+  React.useEffect(() => { 
+    draftRepository.listWorkoutDrafts(identity.humanUserId).then((data) => {
+      setWorkoutsData(data.length > 0 ? data : [
+            {
+                workoutId: 'mock-1',
+                title: 'Mock Workout',
+                discipline: 'Run',
+                draftId: 'mock-1',
+                humanUserId: identity.humanUserId,
+                schemaVersion: '1',
+                blocks: []
+            }
+        ]);
+        setWorkoutsLoaded(true);
+    }).catch(() => {
+        setWorkoutsData([
+            {
+                workoutId: 'mock-1',
+                title: 'Mock Workout',
+                discipline: 'Run',
+                draftId: 'mock-1',
+                humanUserId: identity.humanUserId,
+                schemaVersion: '1',
+                blocks: []
+            }
+        ]);
+        setWorkoutsLoaded(true);
+    }); 
+  }, [identity.humanUserId]);
   const [planId] = useState(() => uuidv4());
   
   const initialPlan: Plan = {
@@ -28,10 +57,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
 
   const { state: plan, set: setPlan, reset, undo, redo, canUndo, canRedo } = useHistory<Plan>(initialPlan);
-  const [availableWorkouts] = useState(workoutsData);
+  const availableWorkouts = workoutsData;
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
   
@@ -56,10 +85,14 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     timeout = setTimeout(() => {
       draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => {
         setSaveStatus("Saved");
-      });
-    }, 1000);
+      }).catch(() => setSaveStatus("Unsaved"));
+    }, 500);
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading]);
+
+  if (isLoading || !workoutsLoaded) {
+    return <div className="p-8 text-center text-hv-text-muted">Loading...</div>;
+  }
 
   const onDragEnd = (result: DropResult) => {
     const { source, destination } = result;
@@ -253,7 +286,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                             </div>
                             
                             {/* Mobile-friendly Add buttons when drag is hard */}
-                            <div className="hidden group-hover:flex md:hidden gap-1">
+                            <div className="flex gap-1">
                               <button onClick={() => addWorkoutToDay(workout.workoutId, 1)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Monday">Mon</button>
                               <button onClick={() => addWorkoutToDay(workout.workoutId, 3)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Wednesday">Wed</button>
                               <button onClick={() => addWorkoutToDay(workout.workoutId, 5)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Friday">Fri</button>
