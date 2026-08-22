@@ -3,12 +3,15 @@ import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea
 import { v4 as uuidv4 } from "uuid";
 import { Workout, Block, ExerciseBlock, Effort, MetricPrescription } from "../../domain/types";
 import { GripVertical, Plus, Trash2, Undo2, Redo2, Save } from "lucide-react";
-import exercisesData from "../../fixtures/exercises.json";
+import { catalogueRepository } from "../../repositories/FirebaseCatalogueRepository";
+import { Exercise } from "../../domain/catalogue";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
+  const [exercisesData, setExercisesData] = React.useState<Exercise[]>([]);
+  React.useEffect(() => { catalogueRepository.getExercises().then(setExercisesData); }, []);
   const [workoutId] = useState(() => uuidv4());
   
   const { state: workout, set: setWorkout, reset, undo, redo, canUndo, canRedo } = useHistory<Workout>({

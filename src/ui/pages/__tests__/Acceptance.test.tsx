@@ -1,3 +1,9 @@
+
+import { draftRepository } from '../../../repositories/DraftRepository';
+import workoutsData from '../../../fixtures/workouts.json';
+import plansData from '../../../fixtures/plans.json';
+import protocolsData from '../../../fixtures/protocols.json';
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { axe } from 'jest-axe';
@@ -32,7 +38,11 @@ vi.mock('idb-keyval', () => {
 });
 
 describe('Acceptance Criteria', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Seed draft repo with fixtures for tests
+    await Promise.all(workoutsData.map((w: any) => draftRepository.saveWorkoutDraft('test-user', w)));
+    await Promise.all(plansData.map((p: any) => draftRepository.savePlanDraft('test-user', p)));
+    await Promise.all(protocolsData.map((p: any) => draftRepository.saveProtocolDraft('test-user', p)));
     mockDbStore.clear();
   });
 
@@ -130,7 +140,7 @@ describe('Acceptance Criteria', () => {
       fireEvent.change(titleInput, { target: { value: 'My Epic Plan' } });
       
       // Mobile-friendly Add buttons (keyboard accessible alternatives to drag and drop)
-      const addButtons = screen.getAllByLabelText('Add to Monday');
+      const addButtons = await screen.findAllByLabelText('Add to Monday');
       fireEvent.click(addButtons[0]);
       
       await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument(), { timeout: 3000 });
@@ -142,3 +152,4 @@ describe('Acceptance Criteria', () => {
     });
   });
 });
+

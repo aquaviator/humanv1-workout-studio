@@ -2,14 +2,10 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router";
 import { LayoutDashboard, Dumbbell, CalendarRange, Library, Settings, LogIn, Activity, LogOut } from "lucide-react";
 import { cn } from "./lib/utils";
 import React, { useState, useEffect } from "react";
-import exercisesData from "./fixtures/exercises.json";
-import workoutsData from "./fixtures/workouts.json";
-import plansData from "./fixtures/plans.json";
-import protocolsData from "./fixtures/protocols.json";
 import WorkoutBuilder from "./ui/pages/WorkoutBuilder";
 import PlanBuilder from "./ui/pages/PlanBuilder";
 import ProtocolBuilder from "./ui/pages/ProtocolBuilder";
-import { authRepository } from "./repositories/LocalAuthRepository";
+import { authRepository } from "./repositories/AuthManager";
 import { HumanIdentity } from "./domain/identity";
 
 function Navigation() {
@@ -61,25 +57,42 @@ function Navigation() {
 }
 
 // Pages placeholders
-function Dashboard() {
+import { draftRepository } from "./repositories/DraftRepository";
+import { catalogueRepository } from "./repositories/FirebaseCatalogueRepository";
+import { entitlementRepository } from "./repositories/FirebaseEntitlementRepository";
+import { Entitlement } from "./domain/entitlement";
+import { Workout, Plan, Protocol } from "./domain/types";
+import { Exercise } from "./domain/catalogue";
+
+function Dashboard({ identity }: { identity: HumanIdentity }) {
+  const [workoutsCount, setWorkoutsCount] = useState(0);
+  const [plansCount, setPlansCount] = useState(0);
+  useEffect(() => {
+    draftRepository.listWorkoutDrafts(identity.humanUserId).then(d => setWorkoutsCount(d.length));
+    draftRepository.listPlanDrafts(identity.humanUserId).then(d => setPlansCount(d.length));
+  }, [identity.humanUserId]);
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg">
           <h2 className="font-semibold text-hv-text-muted mb-2">Recent Workouts</h2>
-          <div className="text-2xl font-bold">{workoutsData.length}</div>
+          <div className="text-2xl font-bold">{workoutsCount}</div>
         </div>
         <div className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg">
           <h2 className="font-semibold text-hv-text-muted mb-2">Active Plans</h2>
-          <div className="text-2xl font-bold">{plansData.length}</div>
+          <div className="text-2xl font-bold">{plansCount}</div>
         </div>
       </div>
     </div>
   );
 }
 
-function WorkoutsList() {
+function WorkoutsList({ identity }: { identity: HumanIdentity }) {
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  useEffect(() => {
+    draftRepository.listWorkoutDrafts(identity.humanUserId).then(setWorkouts);
+  }, [identity.humanUserId]);
   return (
     <div className="p-8">
       <div className="flex justify-between items-center mb-6">
@@ -89,7 +102,7 @@ function WorkoutsList() {
         </Link>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {workoutsData.map(workout => (
+        {workouts.map(workout => (
           <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col cursor-pointer hover:border-hv-primary transition-colors">
             <h2 className="font-semibold mb-1">{workout.title}</h2>
             <div className="flex items-center gap-2 mb-3">
@@ -110,7 +123,11 @@ function WorkoutsList() {
   );
 }
 
-function PlansList() {
+function PlansList({ identity }: { identity: HumanIdentity }) {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  useEffect(() => {
+    draftRepository.listPlanDrafts(identity.humanUserId).then(setPlans);
+  }, [identity.humanUserId]);
   return (
     <div className="p-8">
       <div className="flex justify-between items-center mb-6">
@@ -120,7 +137,7 @@ function PlansList() {
         </Link>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {plansData.map(plan => (
+        {plans.map(plan => (
           <div key={plan.planId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg cursor-pointer hover:border-hv-primary transition-colors">
             <h2 className="font-semibold mb-2">{plan.title}</h2>
             <p className="text-sm text-hv-text-muted mb-4">{plan.description}</p>
@@ -135,6 +152,10 @@ function PlansList() {
 }
 
 function ExerciseLibrary() {
+  const [exercisesData, setExercises] = useState<Exercise[]>([]);
+  useEffect(() => {
+    catalogueRepository.getExercises().then(setExercises);
+  }, []);
   const [search, setSearch] = React.useState("");
   
   const filtered = exercisesData.filter(ex => 
@@ -171,10 +192,14 @@ function ExerciseLibrary() {
   );
 }
 
-function ProtocolLibrary() {
+function ProtocolLibrary({ identity }: { identity: HumanIdentity }) {
+  const [protocols, setProtocols] = useState<Protocol[]>([]);
+  useEffect(() => {
+    draftRepository.listProtocolDrafts(identity.humanUserId).then(setProtocols);
+  }, [identity.humanUserId]);
   const [search, setSearch] = React.useState("");
   
-  const filtered = protocolsData.filter(p => 
+  const filtered = protocols.filter(p => 
     p.title.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -214,6 +239,10 @@ function ProtocolLibrary() {
 }
 
 function AccountSettings({ identity }: { identity: HumanIdentity }) {
+  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
+  useEffect(() => {
+    return entitlementRepository.onEntitlementChanged(identity.humanUserId, setEntitlement);
+  }, [identity.humanUserId]);
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold mb-6">Account</h1>
@@ -226,6 +255,10 @@ function AccountSettings({ identity }: { identity: HumanIdentity }) {
         <div className="mb-4">
           <div className="text-sm text-hv-text-muted">Email</div>
           <div>{identity.email}</div>
+        </div>
+        <div className="mb-4">
+          <div className="text-sm text-hv-text-muted">Entitlement</div>
+          <div>{entitlement ? entitlement.state : "LOADING..."}</div>
         </div>
         <div className="mb-8">
           <div className="text-sm text-hv-text-muted">User ID</div>
@@ -295,13 +328,13 @@ export default function App() {
         <Navigation />
         <main className="flex-1 overflow-y-auto relative">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/workouts" element={<WorkoutsList />} />
+            <Route path="/" element={<Dashboard identity={identity} />} />
+            <Route path="/workouts" element={<WorkoutsList identity={identity} />} />
             <Route path="/workouts/new" element={<WorkoutBuilder identity={identity} />} />
-            <Route path="/plans" element={<PlansList />} />
+            <Route path="/plans" element={<PlansList identity={identity} />} />
             <Route path="/plans/new" element={<PlanBuilder identity={identity} />} />
             <Route path="/library/exercises" element={<ExerciseLibrary />} />
-            <Route path="/library/protocols" element={<ProtocolLibrary />} />
+            <Route path="/library/protocols" element={<ProtocolLibrary identity={identity} />} />
             <Route path="/protocols/new" element={<ProtocolBuilder identity={identity} />} />
             <Route path="/account" element={<AccountSettings identity={identity} />} />
           </Routes>

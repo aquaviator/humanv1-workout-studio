@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { format, addDays, startOfWeek } from "date-fns";
-import plansData from "../../fixtures/plans.json";
-import workoutsData from "../../fixtures/workouts.json";
+import { draftRepository } from "../../repositories/DraftRepository";
+import { Workout } from "../../domain/types";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Dumbbell, Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
-import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
 import { Plan } from "../../domain/types";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
+  const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
+  React.useEffect(() => { draftRepository.listWorkoutDrafts(identity.humanUserId).then(setWorkoutsData); }, [identity.humanUserId]);
   const [planId] = useState(() => uuidv4());
   
   const initialPlan: Plan = {
-    ...plansData[0],
+    schemaVersion: "1",
     planId,
     title: "New Plan",
+    description: "",
     weeks: [{
       weekId: uuidv4(),
       weekNumber: 1,

@@ -1,5 +1,6 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { Workout, Plan, Protocol } from '../domain/types';
+import { syncManager } from './SyncManager';
 
 export interface DraftEnvelope<T> {
   schemaVersion: number;
@@ -20,14 +21,10 @@ export class DraftRepository {
   }
 
   // --- WORKOUTS ---
-
   async saveWorkoutDraft(userId: string, workout: Workout): Promise<void> {
     const key = this.getStoreKey(userId, 'workout', workout.workoutId);
-    
     let currentDraft = await get<DraftEnvelope<Workout>>(key);
-    
     const now = new Date().toISOString();
-    
     const envelope: DraftEnvelope<Workout> = {
       schemaVersion: 1,
       globalId: workout.workoutId,
@@ -40,8 +37,8 @@ export class DraftRepository {
       deletedAt: null,
       originClientId: "web_local_client",
     };
-
     await set(key, envelope);
+    await syncManager.queueUpload(envelope, "workout");
   }
 
   async getWorkoutDraft(userId: string, workoutId: string): Promise<Workout | null> {
@@ -54,7 +51,6 @@ export class DraftRepository {
   async listWorkoutDrafts(userId: string): Promise<Workout[]> {
     const allKeys = await keys();
     const workoutKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`drafts_${userId}_workout_`));
-    
     const drafts: Workout[] = [];
     for (const key of workoutKeys) {
       const draft = await get<DraftEnvelope<Workout>>(key as string);
@@ -73,11 +69,11 @@ export class DraftRepository {
       draft.updatedAt = draft.deletedAt;
       draft.revision += 1;
       await set(key, draft);
+      await syncManager.queueUpload(draft, "workout");
     }
   }
 
   // --- PLANS ---
-
   async savePlanDraft(userId: string, plan: Plan): Promise<void> {
     const key = this.getStoreKey(userId, 'plan', plan.planId);
     let currentDraft = await get<DraftEnvelope<Plan>>(key);
@@ -95,6 +91,7 @@ export class DraftRepository {
       originClientId: "web_local_client",
     };
     await set(key, envelope);
+    await syncManager.queueUpload(envelope, "plan");
   }
 
   async getPlanDraft(userId: string, planId: string): Promise<Plan | null> {
@@ -116,9 +113,20 @@ export class DraftRepository {
     }
     return drafts;
   }
+  
+  async deletePlanDraft(userId: string, planId: string): Promise<void> {
+    const key = this.getStoreKey(userId, 'plan', planId);
+    const draft = await get<DraftEnvelope<Plan>>(key);
+    if (draft) {
+      draft.deletedAt = new Date().toISOString();
+      draft.updatedAt = draft.deletedAt;
+      draft.revision += 1;
+      await set(key, draft);
+      await syncManager.queueUpload(draft, "plan");
+    }
+  }
 
   // --- PROTOCOLS ---
-
   async saveProtocolDraft(userId: string, protocol: Protocol): Promise<void> {
     const key = this.getStoreKey(userId, 'protocol', protocol.protocolId);
     let currentDraft = await get<DraftEnvelope<Protocol>>(key);
@@ -136,6 +144,7 @@ export class DraftRepository {
       originClientId: "web_local_client",
     };
     await set(key, envelope);
+    await syncManager.queueUpload(envelope, "protocol");
   }
 
   async getProtocolDraft(userId: string, protocolId: string): Promise<Protocol | null> {
@@ -156,6 +165,18 @@ export class DraftRepository {
       }
     }
     return drafts;
+  }
+  
+  async deleteProtocolDraft(userId: string, protocolId: string): Promise<void> {
+    const key = this.getStoreKey(userId, 'protocol', protocolId);
+    const draft = await get<DraftEnvelope<Protocol>>(key);
+    if (draft) {
+      draft.deletedAt = new Date().toISOString();
+      draft.updatedAt = draft.deletedAt;
+      draft.revision += 1;
+      await set(key, draft);
+      await syncManager.queueUpload(draft, "protocol");
+    }
   }
 }
 

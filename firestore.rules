@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getHumanIdentity() {
+      return get(/databases/$(database)/documents/user_identities/$(request.auth.uid)).data.humanUserId;
+    }
+    
+    function isOwner(humanUserId) {
+      return isAuthenticated() && getHumanIdentity() == humanUserId;
+    }
+
+    match /user_identities/{authUid} {
+      allow read: if isAuthenticated() && request.auth.uid == authUid;
+      allow write: if isAuthenticated() && request.auth.uid == authUid;
+    }
+
+    match /entitlements/{humanUserId} {
+      allow read: if isOwner(humanUserId);
+      allow write: if false; 
+    }
+
+    match /exercise_catalogue/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false; 
+    }
+    
+    match /staging_exercises/{document=**} {
+      allow read, write: if false; 
+    }
+
+    match /humans/{humanUserId}/{collection}/{itemId} {
+      allow read: if isOwner(humanUserId);
+      
+      allow create: if isOwner(humanUserId)
+                    && request.resource.data.humanUserId == humanUserId
+                    && request.resource.data.schemaVersion is number
+                    && request.resource.data.revision == 1;
+
+      allow update: if isOwner(humanUserId)
+                    && request.resource.data.humanUserId == humanUserId
+                    && request.resource.data.schemaVersion is number
+                    && request.resource.data.revision > resource.data.revision;
+                    
+      allow delete: if false; 
+    }
+  }
+}
