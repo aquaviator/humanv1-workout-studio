@@ -1,6 +1,6 @@
 import { Entitlement, EntitlementRepository, EntitlementState } from '../domain/entitlement';
 import { auth, db } from '../config/firebase';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, Timestamp } from 'firebase/firestore';
 import * as idb from 'idb-keyval';
 
 interface EntitlementReceipt {
@@ -23,7 +23,9 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
     if (!authUid) return { state: 'EXPIRED' };
 
     try {
-      const docRef = doc(db, 'entitlements', humanUserId);
+      const account = await getDoc(doc(db, 'accounts', authUid));
+      if (!account.exists() || account.data().humanUserId !== humanUserId || account.data().status !== 'ACTIVE') return { state: 'EXPIRED' };
+      const docRef = doc(db, 'accounts', authUid, 'entitlements', 'current');
       const snapshot = await getDoc(docRef);
       if (!snapshot.exists()) {
         return { state: 'EXPIRED' };
@@ -33,7 +35,7 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
         humanUserId,
         authUid,
         state: this.mapState(data.state),
-        expiresAt: data.expiresAt || null,
+        expiresAt: this.toIso(data.expiresAt),
         cachedAt: new Date().toISOString()
       };
       await idb.set(this.getCacheKey(humanUserId), receipt);
@@ -50,7 +52,9 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
   }
 
   onEntitlementChanged(humanUserId: string, callback: (entitlement: Entitlement) => void): () => void {
-    const docRef = doc(db, 'entitlements', humanUserId);
+    const authUidAtSubscribe = auth.currentUser?.uid;
+    if (!authUidAtSubscribe) { callback({ state: 'EXPIRED' }); return () => undefined; }
+    const docRef = doc(db, 'accounts', authUidAtSubscribe, 'entitlements', 'current');
     callback({ state: 'CHECKING' });
     
     return onSnapshot(docRef, async (snapshot) => {
@@ -68,7 +72,7 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
           humanUserId,
           authUid,
           state: this.mapState(data.state),
-          expiresAt: data.expiresAt || null,
+          expiresAt: this.toIso(data.expiresAt),
           cachedAt: new Date().toISOString()
         };
         await idb.set(this.getCacheKey(humanUserId), receipt);
@@ -98,10 +102,18 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
   }
 
   private mapState(state: any): EntitlementState {
-    if (['ACTIVE_TRIAL', 'ACTIVE_SUBSCRIPTION', 'EXPIRED'].includes(state)) {
+    const aliases: Record<string, EntitlementState> = { ACTIVE_TRIAL: 'TRIAL_ACTIVE', ACTIVE_SUBSCRIPTION: 'ACTIVE' };
+    if (typeof state === 'string' && aliases[state]) return aliases[state];
+    if (['TRIAL_ACTIVE', 'ACTIVE', 'CANCELLED_ACTIVE', 'GRACE_PERIOD', 'ACCOUNT_HOLD', 'PAUSED', 'PENDING', 'EXPIRED', 'REVOKED'].includes(state)) {
       return state as EntitlementState;
     }
     return 'EXPIRED';
+  }
+
+  private toIso(value: unknown): string | null {
+    if (value instanceof Timestamp) return value.toDate().toISOString();
+    if (value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate(): Date }).toDate().toISOString();
+    return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null;
   }
 }
 

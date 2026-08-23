@@ -1,4 +1,4 @@
-export type EntitlementState = 'CHECKING' | 'ACTIVE_TRIAL' | 'ACTIVE_SUBSCRIPTION' | 'EXPIRED' | 'VERIFICATION_UNAVAILABLE';
+export type EntitlementState = 'CHECKING' | 'TRIAL_ACTIVE' | 'ACTIVE' | 'CANCELLED_ACTIVE' | 'GRACE_PERIOD' | 'ACCOUNT_HOLD' | 'PAUSED' | 'PENDING' | 'EXPIRED' | 'REVOKED' | 'VERIFICATION_UNAVAILABLE';
 
 export interface Entitlement {
   state: EntitlementState;

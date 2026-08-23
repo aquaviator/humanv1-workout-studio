@@ -1,102 +1,69 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    function isAuthenticated() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function accountPath() { return /databases/$(database)/documents/accounts/$(request.auth.uid); }
+    function humanPath(humanUserId) { return /databases/$(database)/documents/users/$(humanUserId); }
+    function owns(humanUserId) {
+      return signedIn() && exists(accountPath())
+        && get(accountPath()).data.humanUserId == humanUserId
+        && get(accountPath()).data.status == 'ACTIVE' && get(accountPath()).data.schemaVersion == 1
+        && exists(humanPath(humanUserId))
+        && get(humanPath(humanUserId)).data.ownerFirebaseUid == request.auth.uid
+        && get(humanPath(humanUserId)).data.status == 'ACTIVE' && get(humanPath(humanUserId)).data.schemaVersion == 1;
     }
-    
-    function getHumanIdentityDoc() {
-      return exists(/databases/$(database)/documents/user_identities/$(request.auth.uid)) ? get(/databases/$(database)/documents/user_identities/$(request.auth.uid)) : null;
-    }
-    
-    function isOwner(humanUserId) {
-      return isAuthenticated() && getHumanIdentityDoc() != null && getHumanIdentityDoc().data.humanUserId == humanUserId;
-    }
-
-    // 1. Trusted identity vulnerability
-    match /user_identities/{authUid} {
-      allow read: if isAuthenticated() && request.auth.uid == authUid;
-      allow write: if false; // 1. All client writes to trusted identity documents are denied.
+    function releaseIsReadable(releaseId) {
+      let release = get(/databases/$(database)/documents/exercise_catalogue_releases/$(releaseId));
+      return release.data.status == 'published' && release.data.channel == 'production' && release.data.validationStatus == 'validated';
     }
 
-    match /entitlements/{humanUserId} {
-      allow read: if isOwner(humanUserId);
-      allow write: if false; 
-    }
-
-    // 3. Correct governed catalogue topology
-    match /exercise_catalogue/current {
-      allow read: if isAuthenticated();
+    match /accounts/{firebaseUid} {
+      allow read: if signedIn() && request.auth.uid == firebaseUid;
       allow write: if false;
+      match /entitlements/{documentId} {
+        allow read: if signedIn() && request.auth.uid == firebaseUid && documentId == 'current';
+        allow write: if false;
+      }
     }
+    match /exercise_catalogue/current { allow read: if signedIn(); allow write: if false; }
     match /exercise_catalogue_releases/{releaseId} {
-      allow read: if isAuthenticated();
+      allow read: if signedIn() && resource.data.status == 'published' && resource.data.channel == 'production' && resource.data.validationStatus == 'validated';
       allow write: if false;
+      match /exercises/{exerciseId} { allow read: if signedIn() && releaseIsReadable(releaseId); allow write: if false; }
     }
-    match /exercise_catalogue_releases/{releaseId}/exercises/{exerciseId} {
-      allow read: if isAuthenticated();
+    match /staging_exercises/{document=**} { allow read, write: if false; }
+
+    match /users/{humanUserId} {
+      allow read: if owns(humanUserId);
       allow write: if false;
-    }
-    
-    match /staging_exercises/{document=**} {
-      allow read, write: if false; 
-    }
-
-    // Explicit supported collections
-    match /humans/{humanUserId} {
-      
-      function validateDoc(data) {
-        return data.humanUserId == humanUserId
-               && data.schemaVersion is string; // Wait, original was number, but standard is string (e.g. "1")
+      function validDraft(data, itemId) {
+        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'status', 'payload', 'createdAt', 'updatedAt', 'deletedAt', 'originClientId'])
+          && data.schemaVersion == 1 && data.globalId == itemId && data.humanUserId == humanUserId
+          && data.revision is int && data.revision >= 1 && data.status == 'DRAFT' && data.payload is map
+          && data.createdAt is string && data.updatedAt is string
+          && (data.deletedAt == null || data.deletedAt is string) && data.originClientId is string;
       }
-      
-      // We will define a helper for mutations
-      function isValidCreate(data) {
-        return isOwner(humanUserId)
-               && validateDoc(data)
-               && data.revision == 1;
+      function validCreate(itemId) { return owns(humanUserId) && validDraft(request.resource.data, itemId); }
+      function validUpdate(itemId) {
+        return owns(humanUserId) && validDraft(request.resource.data, itemId)
+          && request.resource.data.humanUserId == resource.data.humanUserId
+          && request.resource.data.globalId == resource.data.globalId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.revision > resource.data.revision;
       }
-      
-      function isValidUpdate(data, oldData) {
-        return isOwner(humanUserId)
-               && validateDoc(data)
-               && data.revision > oldData.revision
-               && data.humanUserId == oldData.humanUserId; // Owner fields cannot change
+      match /workoutDrafts/{itemId} {
+        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
       }
-
-      match /workouts/{itemId} {
-        allow read: if isOwner(humanUserId);
-        allow create: if isValidCreate(request.resource.data);
-        allow update: if isValidUpdate(request.resource.data, resource.data);
-        allow delete: if false; 
+      match /planDrafts/{itemId} {
+        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
       }
-      match /plans/{itemId} {
-        allow read: if isOwner(humanUserId);
-        allow create: if isValidCreate(request.resource.data);
-        allow update: if isValidUpdate(request.resource.data, resource.data);
-        allow delete: if false; 
+      match /protocolDrafts/{itemId} {
+        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
       }
-      match /protocols/{itemId} {
-        allow read: if isOwner(humanUserId);
-        allow create: if isValidCreate(request.resource.data);
-        allow update: if isValidUpdate(request.resource.data, resource.data);
-        allow delete: if false; 
+      match /{immutableCollection}/{itemId} {
+        allow read: if owns(humanUserId) && immutableCollection in ['workouts', 'workoutVersions', 'plans', 'planVersions', 'protocols', 'protocolVersions', 'studioCommands', 'studioProcessedCommands'];
+        allow write: if false;
       }
-      match /commands/{itemId} {
-        allow read: if isOwner(humanUserId);
-        allow create: if isValidCreate(request.resource.data);
-        allow update: if isValidUpdate(request.resource.data, resource.data);
-        allow delete: if false; 
-      }
-      match /acknowledgements/{itemId} {
-        allow read: if isOwner(humanUserId);
-        allow create: if isValidCreate(request.resource.data);
-        allow update: if isValidUpdate(request.resource.data, resource.data);
-        allow delete: if false; 
-      }
-      
-      // Unknown collection names are denied by default since we don't have a match for them.
     }
   }
 }

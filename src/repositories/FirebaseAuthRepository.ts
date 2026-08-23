@@ -19,7 +19,7 @@ export class FirebaseAuthRepository implements AuthRepository {
     if (!user) return null;
     
     try {
-      const idDoc = await getDoc(doc(db, 'user_identities', user.uid));
+      const idDoc = await getDoc(doc(db, 'accounts', user.uid));
       if (!idDoc.exists()) {
         return null;
       }
@@ -28,14 +28,19 @@ export class FirebaseAuthRepository implements AuthRepository {
       if (!data.humanUserId || typeof data.humanUserId !== 'string') {
          return null;
       }
-      if (data.authUid !== user.uid) {
+      if (data.status !== 'ACTIVE' || data.schemaVersion !== 1) {
          return null;
       }
+
+      const humanDoc = await getDoc(doc(db, 'users', data.humanUserId));
+      if (!humanDoc.exists()) return null;
+      const human = humanDoc.data();
+      if (human.ownerFirebaseUid !== user.uid || human.status !== 'ACTIVE' || human.schemaVersion !== 1) return null;
 
       return {
         humanUserId: data.humanUserId,
         email: user.email || '',
-        displayName: data.displayName || user.displayName || 'Human',
+        displayName: human.displayName || user.displayName || 'Human',
       };
     } catch (e) {
       console.error('resolveIdentity error', e);
@@ -45,7 +50,7 @@ export class FirebaseAuthRepository implements AuthRepository {
 
   async signIn(): Promise<void> {
     if (env.useEmulator) {
-      await signInWithEmailAndPassword(auth, "testuser1@example.com", "password123");
+      await signInWithEmailAndPassword(auth, env.emulator.authEmail, env.emulator.authPassword);
     } else {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);

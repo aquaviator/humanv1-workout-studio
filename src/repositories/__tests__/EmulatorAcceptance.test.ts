@@ -11,7 +11,7 @@ import { auth, db } from '../../config/firebase';
 import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
-import { sha256 } from 'js-sha256';
+import { catalogueChecksum } from '../FirebaseCatalogueRepository';
 
 beforeAll(async () => {
   // Create synthetic users
@@ -21,23 +21,17 @@ beforeAll(async () => {
   } catch(e) {} // Ignore if exists
   
   // Create identity docs
-  await adminDb.collection('user_identities').doc('auth_1').set({ humanUserId: 'human_1', authUid: 'auth_1', displayName: 'User 1' });
-  await adminDb.collection('user_identities').doc('auth_2').set({ humanUserId: 'human_2', authUid: 'auth_2', displayName: 'User 2' });
+  await adminDb.collection('accounts').doc('auth_1').set({ humanUserId: 'human_1', status: 'ACTIVE', schemaVersion: 1 });
+  await adminDb.collection('accounts').doc('auth_2').set({ humanUserId: 'human_2', status: 'ACTIVE', schemaVersion: 1 });
+  await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 1' });
+  await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 2' });
   
   // Seed catalogue
   const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [], category: '', aliases: [], metricProfile: 'REPS_ONLY' };
-  const mockParsed = {
-    exerciseId: mockExercise.exerciseId,
-    name: mockExercise.name,
-    category: mockExercise.category,
-    equipment: mockExercise.equipment,
-    aliases: mockExercise.aliases,
-    metricProfile: mockExercise.metricProfile
-  };
-  const computedChecksum = sha256(JSON.stringify([mockParsed].sort((a, b) => a.exerciseId.localeCompare(b.exerciseId))));
+  const computedChecksum = catalogueChecksum([mockExercise]);
   
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
-  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', published: true, validationState: 'VALIDATED', channel: 'PRODUCTION', count: 1, checksum: computedChecksum });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: 1, status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
   await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set(mockExercise);
 });
 
@@ -96,7 +90,7 @@ describe('Emulator Acceptance', () => {
     await syncManager.syncPending(); // Explicitly wait
     
     // Check Firestore
-    const remote = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_1'));
+    const remote = await getDoc(doc(db, 'users', 'human_1', 'workoutDrafts', 'workout_1'));
     expect(remote.exists()).toBe(true);
     expect(remote.data().payload.title).toBe("My Workout");
 
@@ -106,7 +100,7 @@ describe('Emulator Acceptance', () => {
     // Conflict isolation
     // Modify remote to have higher revision
     
-    await updateDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_1'), { revision: 10 });
+    await adminDb.collection('users').doc('human_1').collection('workoutDrafts').doc('workout_1').update({ revision: 10 });
     
     // Local save again
     await draftRepo.saveWorkoutDraft('human_1', {
@@ -122,7 +116,7 @@ describe('Emulator Acceptance', () => {
     await syncManager.syncPending(); // wait for sync
     
     // Should be isolated as conflict, remote is still revision 10
-    const remote2 = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_1'));
+    const remote2 = await getDoc(doc(db, 'users', 'human_1', 'workoutDrafts', 'workout_1'));
     expect(remote2.data().revision).toBe(10);
     
     // Local should still have the conflict
