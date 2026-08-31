@@ -5,6 +5,17 @@ export interface Exercise {
   equipment: string[];
   aliases: string[];
   metricProfile?: any;
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
+  muscleArea?: string[];
+  movementPattern?: string[];
+  environment?: string[];
+  laterality?: string;
+  modalitySuitability?: string[];
+  technicalComplexity?: string;
+  riskIndicators?: string[];
+  specialistReview?: boolean;
+  tags?: string[];
 }
 
 export interface CatalogueRelease {

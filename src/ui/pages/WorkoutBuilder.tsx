@@ -2,9 +2,10 @@ import React, { useState, useEffect } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { v4 as uuidv4 } from "uuid";
 import { Workout, Block, ExerciseBlock, Effort, MetricPrescription } from "../../domain/types";
-import { GripVertical, Plus, Trash2, Undo2, Redo2, Save } from "lucide-react";
+import { GripVertical, Plus, Trash2, Undo2, Redo2, Save, ChevronUp, ChevronDown } from "lucide-react";
 import { catalogueRepository } from "../../repositories/FirebaseCatalogueRepository";
 import { Exercise } from "../../domain/catalogue";
+import { ExercisePicker } from "../components/ExercisePicker";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
@@ -108,6 +109,19 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     });
   };
 
+  const moveBlock = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === workout.blocks.length - 1) return;
+    
+    const newBlocks = Array.from(workout.blocks);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    // Swap
+    [newBlocks[index], newBlocks[targetIndex]] = [newBlocks[targetIndex], newBlocks[index]];
+    
+    setWorkout({ ...workout, blocks: newBlocks });
+  };
+
   const addEffort = (blockId: string) => {
     setWorkout({
       ...workout,
@@ -199,17 +213,33 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                            <div {...provided.dragHandleProps} className="text-hv-text-muted flex items-center justify-center cursor-grab active:cursor-grabbing p-1" aria-label="Drag handle">
                               <GripVertical className="w-5 h-5" />
                            </div>
-                           <button onClick={() => removeBlock(block.blockId)} className="text-hv-error hover:text-red-400 p-1 rounded" aria-label="Remove exercise">
-                              <Trash2 className="w-5 h-5" />
-                           </button>
+                           <div className="flex gap-2">
+                             <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="text-hv-text-muted hover:text-hv-text disabled:opacity-30 p-1" aria-label="Move block up">
+                               <ChevronUp className="w-5 h-5" />
+                             </button>
+                             <button onClick={() => moveBlock(index, 'down')} disabled={index === workout.blocks.length - 1} className="text-hv-text-muted hover:text-hv-text disabled:opacity-30 p-1" aria-label="Move block down">
+                               <ChevronDown className="w-5 h-5" />
+                             </button>
+                             <button onClick={() => removeBlock(block.blockId)} className="text-hv-error hover:text-red-400 p-1 rounded" aria-label="Remove exercise">
+                                <Trash2 className="w-5 h-5" />
+                             </button>
+                           </div>
                         </div>
                         
-                        <div
-                          {...provided.dragHandleProps}
-                          className="text-hv-text-muted hover:text-hv-text hidden md:flex items-center justify-center cursor-grab active:cursor-grabbing p-1"
-                          aria-label="Drag handle"
-                        >
-                          <GripVertical className="w-5 h-5" />
+                        <div className="hidden md:flex flex-col gap-1 items-center justify-center">
+                          <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="text-hv-text-muted hover:text-hv-text disabled:opacity-30 p-1" aria-label="Move block up">
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <div
+                            {...provided.dragHandleProps}
+                            className="text-hv-text-muted hover:text-hv-text flex items-center justify-center cursor-grab active:cursor-grabbing p-1"
+                            aria-label="Drag handle"
+                          >
+                            <GripVertical className="w-5 h-5" />
+                          </div>
+                          <button onClick={() => moveBlock(index, 'down')} disabled={index === workout.blocks.length - 1} className="text-hv-text-muted hover:text-hv-text disabled:opacity-30 p-1" aria-label="Move block down">
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-lg mb-4">
@@ -359,33 +389,11 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
       {/* Exercise Drawer */}
       {isExerciseDrawerOpen && (
-        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-hv-border bg-hv-surface-1 md:h-full flex flex-col absolute md:static bottom-0 left-0 right-0 h-[60vh] z-10 shadow-xl">
-          <div className="p-4 border-b border-hv-border flex justify-between items-center">
-            <h2 className="font-bold">Library</h2>
-            <button onClick={() => setIsExerciseDrawerOpen(false)} className="text-hv-text-muted hover:text-hv-text">
-              Close
-            </button>
-          </div>
-          <div className="p-4 flex-1 overflow-y-auto space-y-2">
-            {exercisesData.map((ex) => (
-              <button
-                key={ex.exerciseId}
-                onClick={() => addExercise(ex.exerciseId, ex.name)}
-                className="w-full text-left p-3 rounded-md hover:bg-hv-surface-2 border border-transparent hover:border-hv-border transition-colors group"
-              >
-                <div className="font-semibold group-hover:text-hv-primary transition-colors">{ex.name}</div>
-                <div className="text-xs text-hv-text-muted mt-1">{ex.category}</div>
-                <div className="flex gap-1 mt-2 flex-wrap">
-                  {ex.metricProfile.primary.map(m => (
-                    <span key={m} className="text-[10px] bg-hv-bg px-1.5 py-0.5 rounded text-hv-text-muted">
-                      {m.replace('_', ' ')}
-                    </span>
-                  ))}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
+        <ExercisePicker 
+          exercises={exercisesData} 
+          onSelect={addExercise} 
+          onClose={() => setIsExerciseDrawerOpen(false)} 
+        />
       )}
     </div>
   );
