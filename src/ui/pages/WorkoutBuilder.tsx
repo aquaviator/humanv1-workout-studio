@@ -14,7 +14,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [exercisesData, setExercisesData] = React.useState<Exercise[]>([]);
   React.useEffect(() => { catalogueRepository.getExercises().then(setExercisesData); }, []);
   const [workoutId] = useState(() => uuidv4());
-  
+
   const { state: workout, set: setWorkout, reset, undo, redo, canUndo, canRedo } = useHistory<Workout>({
     schemaVersion: "humanv1.workout/1",
     workoutId,
@@ -67,7 +67,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const addExercise = (exerciseId: string, name: string) => {
     const exercise = exercisesData.find(e => e.exerciseId === exerciseId);
     if (!exercise) return;
-    
+
     // Auto-generate a prescription based on the primary metrics
     const defaultPrescriptions: MetricPrescription[] = exercise.metricProfile.primary.map((metricKey, idx) => {
       let unit = "count";
@@ -75,7 +75,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       if (metricKey === "duration") { unit = "s"; val = 60; }
       if (metricKey === "distance") { unit = "m"; val = 100; }
       if (metricKey === "external_load") { unit = "kg"; val = 20; }
-      
+
       return {
         prescriptionId: uuidv4(),
         metricKey,
@@ -112,13 +112,13 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const moveBlock = (index: number, direction: 'up' | 'down') => {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === workout.blocks.length - 1) return;
-    
+
     const newBlocks = Array.from(workout.blocks);
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    
+
     // Swap
     [newBlocks[index], newBlocks[targetIndex]] = [newBlocks[targetIndex], newBlocks[index]];
-    
+
     setWorkout({ ...workout, blocks: newBlocks });
   };
 
@@ -147,14 +147,14 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       })
     });
   };
-  
+
   const updateMetric = (blockId: string, effortId: string, prescriptionId: string, value: number) => {
     setWorkout({
       ...workout,
       blocks: workout.blocks.map(b => {
         if (b.blockId !== blockId || b.type !== "EXERCISE") return b;
-        return { 
-          ...b, 
+        return {
+          ...b,
           efforts: b.efforts.map(e => {
             if (e.effortId !== effortId) return e;
             return {
@@ -225,7 +225,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                              </button>
                            </div>
                         </div>
-                        
+
                         <div className="hidden md:flex flex-col gap-1 items-center justify-center">
                           <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="text-hv-text-muted hover:text-hv-text disabled:opacity-30 p-1" aria-label="Move block up">
                             <ChevronUp className="w-4 h-4" />
@@ -243,13 +243,13 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-lg mb-4">
-                            {block.type === "EXERCISE" ? block.exerciseNameSnapshot : block.type}
+                            {block.type === "EXERCISE" ? block.exerciseNameSnapshot : block.type === "SUPERSET" ? "Superset" : block.type === "CIRCUIT" ? `Circuit (${block.rounds} Rounds)` : block.type}
                           </h3>
                           {block.type === "REST" && (
                             <div className="flex items-center gap-4 text-sm bg-hv-surface-2 p-2 rounded">
                               <span className="text-hv-text-muted">Rest for</span>
                               <div className="flex items-center bg-hv-bg rounded px-2 py-1 border border-hv-border focus-within:border-hv-primary">
-                                <input 
+                                <input
                                   type="number"
                                   className="bg-transparent w-12 outline-none text-right font-mono text-hv-text"
                                   value={block.durationSeconds || ""}
@@ -263,10 +263,42 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                               </div>
                             </div>
                           )}
-                          
+
+
+                          {block.type === "SUPERSET" && (
+                            <div className="space-y-4">
+                              <p className="text-sm text-hv-text-muted">A superset groups multiple exercises performed sequentially with minimal rest.</p>
+                              {block.exercises && block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
+                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
+                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                                </div>
+                              ))}
+                              <div className="text-sm text-hv-primary">Select an exercise from the library and drag it here (TBD in v1.1)</div>
+                            </div>
+                          )}
+                          {block.type === "CIRCUIT" && (
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">Rounds:</span>
+                                <input type="number" className="w-16 bg-hv-bg border border-hv-border rounded px-2 py-1 text-sm" value={block.rounds || 3} onChange={(e) => {
+                                  const updated = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, rounds: Number(e.target.value) } : b);
+                                  setWorkout({ ...workout, blocks: updated as any[] });
+                                }} />
+                              </div>
+                              <p className="text-sm text-hv-text-muted">A circuit repeats all exercises for the specified rounds.</p>
+                              {block.exercises && block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
+                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
+                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {block.type === "NOTE" && (
                             <div className="flex items-center gap-4 text-sm bg-hv-surface-2 p-2 rounded">
-                              <textarea 
+                              <textarea
                                 className="bg-transparent outline-none w-full text-hv-text resize-none"
                                 rows={2}
                                 placeholder="Add notes..."
@@ -284,7 +316,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                               {block.efforts.map((effort, eIdx) => (
                                 <div key={effort.effortId} className="flex flex-wrap items-center gap-2 md:gap-4 text-sm bg-hv-surface-2 p-2 rounded">
                                   <span className="w-4 md:w-6 text-hv-text-muted font-mono">{eIdx + 1}</span>
-                                  <select 
+                                  <select
                                     className="bg-transparent text-hv-text-muted border-none outline-none focus:text-hv-text min-w-[80px]"
                                     value={effort.effortType}
                                     onChange={(e) => {
@@ -301,11 +333,11 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                                     <option value="FAILURE">Failure</option>
                                     <option value="TIMED">Timed</option>
                                   </select>
-                                  
+
                                   <div className="flex-1 flex flex-wrap gap-2 md:gap-4 items-center">
                                     {effort.prescriptions.map((p) => (
                                       <div key={p.prescriptionId} className="flex items-center bg-hv-bg rounded px-2 py-1 border border-hv-border focus-within:border-hv-primary">
-                                        <input 
+                                        <input
                                           type="number"
                                           className="bg-transparent w-12 outline-none text-right font-mono"
                                           value={p.targetValue || p.minimumValue || ""}
@@ -316,7 +348,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                                       </div>
                                     ))}
                                   </div>
-                                  
+
                                   <button onClick={() => removeEffort(block.blockId, effort.effortId)} className="text-hv-text-muted hover:text-hv-error ml-auto p-1" aria-label="Remove effort">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -345,7 +377,8 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           </Droppable>
         </DragDropContext>
 
-        <div className="flex flex-col sm:flex-row gap-4 mt-8">
+
+        <div className="flex flex-col sm:flex-row gap-4 mt-8 flex-wrap">
           <button
             onClick={() => setIsExerciseDrawerOpen(true)}
             className="flex-1 border-2 border-dashed border-hv-border hover:border-hv-primary text-hv-text-muted hover:text-hv-primary rounded-lg p-4 flex items-center justify-center gap-2 transition-colors"
@@ -353,7 +386,38 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <Plus className="w-5 h-5" />
             <span>Add Exercise</span>
           </button>
-          
+
+          <button
+            onClick={() => {
+              const newBlock: Block = {
+                blockId: uuidv4(),
+                type: "SUPERSET",
+                exercises: []
+              };
+              setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
+            }}
+            className="flex-1 border-2 border-dashed border-hv-border hover:border-hv-primary text-hv-text-muted hover:text-hv-primary rounded-lg p-4 flex items-center justify-center gap-2 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Add Superset</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const newBlock: Block = {
+                blockId: uuidv4(),
+                type: "CIRCUIT",
+                rounds: 3,
+                exercises: []
+              };
+              setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
+            }}
+            className="flex-1 border-2 border-dashed border-hv-border hover:border-hv-primary text-hv-text-muted hover:text-hv-primary rounded-lg p-4 flex items-center justify-center gap-2 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Add Circuit</span>
+          </button>
+
           <button
             onClick={() => {
               const newBlock: Block = {
@@ -369,7 +433,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <Plus className="w-5 h-5" />
             <span>Add Rest</span>
           </button>
-          
+
           <button
             onClick={() => {
               const newBlock: Block = {
@@ -385,14 +449,14 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <span>Add Note</span>
           </button>
         </div>
-      </div>
+</div>
 
       {/* Exercise Drawer */}
       {isExerciseDrawerOpen && (
-        <ExercisePicker 
-          exercises={exercisesData} 
-          onSelect={addExercise} 
-          onClose={() => setIsExerciseDrawerOpen(false)} 
+        <ExercisePicker
+          exercises={exercisesData}
+          onSelect={addExercise}
+          onClose={() => setIsExerciseDrawerOpen(false)}
         />
       )}
     </div>

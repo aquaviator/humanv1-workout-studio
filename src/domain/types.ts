@@ -50,7 +50,22 @@ export interface NoteBlock {
   text: string;
 }
 
-export type Block = ExerciseBlock | RestBlock | TransitionBlock | NoteBlock; // Extensible
+export interface SupersetBlock {
+  blockId: StableId;
+  type: "SUPERSET";
+  exercises: ExerciseBlock[];
+  notes?: string;
+}
+
+export interface CircuitBlock {
+  blockId: StableId;
+  type: "CIRCUIT";
+  exercises: ExerciseBlock[];
+  rounds: number;
+  notes?: string;
+}
+
+export type Block = ExerciseBlock | RestBlock | TransitionBlock | NoteBlock | SupersetBlock | CircuitBlock; // Extensible
 
 export interface Workout {
   schemaVersion: string;
