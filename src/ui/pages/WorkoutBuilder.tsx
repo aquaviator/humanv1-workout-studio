@@ -26,6 +26,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   });
 
   const [isExerciseDrawerOpen, setIsExerciseDrawerOpen] = useState(false);
+  const [exerciseTargetGroupId, setExerciseTargetGroupId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -98,8 +99,50 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
         },
       ],
     };
-    setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
+    if (exerciseTargetGroupId) {
+      setWorkout({
+        ...workout,
+        blocks: workout.blocks.map((block) =>
+          block.blockId === exerciseTargetGroupId && (block.type === "SUPERSET" || block.type === "CIRCUIT")
+            ? { ...block, exercises: [...block.exercises, newBlock] }
+            : block,
+        ),
+      });
+    } else {
+      setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
+    }
+    setExerciseTargetGroupId(null);
     setIsExerciseDrawerOpen(false);
+  };
+
+  const openExercisePicker = (groupId: string | null = null) => {
+    setExerciseTargetGroupId(groupId);
+    setIsExerciseDrawerOpen(true);
+  };
+
+  const removeGroupedExercise = (groupId: string, exerciseBlockId: string) => {
+    setWorkout({
+      ...workout,
+      blocks: workout.blocks.map((block) =>
+        block.blockId === groupId && (block.type === "SUPERSET" || block.type === "CIRCUIT")
+          ? { ...block, exercises: block.exercises.filter((exercise) => exercise.blockId !== exerciseBlockId) }
+          : block,
+      ),
+    });
+  };
+
+  const moveGroupedExercise = (groupId: string, index: number, direction: "up" | "down") => {
+    setWorkout({
+      ...workout,
+      blocks: workout.blocks.map((block) => {
+        if (block.blockId !== groupId || (block.type !== "SUPERSET" && block.type !== "CIRCUIT")) return block;
+        const targetIndex = direction === "up" ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= block.exercises.length) return block;
+        const exercises = [...block.exercises];
+        [exercises[index], exercises[targetIndex]] = [exercises[targetIndex], exercises[index]];
+        return { ...block, exercises };
+      }),
+    });
   };
 
   const removeBlock = (id: string) => {
@@ -268,31 +311,43 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                           {block.type === "SUPERSET" && (
                             <div className="space-y-4">
                               <p className="text-sm text-hv-text-muted">A superset groups multiple exercises performed sequentially with minimal rest.</p>
-                              {block.exercises && block.exercises.map((exBlock, i) => (
-                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
-                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
-                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                              {block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border flex items-center gap-2">
+                                  <div className="flex-1">
+                                    <div className="font-medium mb-1">{exBlock.exerciseNameSnapshot}</div>
+                                    <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                                  </div>
+                                  <button onClick={() => moveGroupedExercise(block.blockId, i, "up")} disabled={i === 0} aria-label={`Move ${exBlock.exerciseNameSnapshot} up`} className="p-2 disabled:opacity-30"><ChevronUp className="w-4 h-4" /></button>
+                                  <button onClick={() => moveGroupedExercise(block.blockId, i, "down")} disabled={i === block.exercises.length - 1} aria-label={`Move ${exBlock.exerciseNameSnapshot} down`} className="p-2 disabled:opacity-30"><ChevronDown className="w-4 h-4" /></button>
+                                  <button onClick={() => removeGroupedExercise(block.blockId, exBlock.blockId)} aria-label={`Remove ${exBlock.exerciseNameSnapshot} from superset`} className="p-2 text-hv-error"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               ))}
-                              <div className="text-sm text-hv-primary">Select an exercise from the library and drag it here (TBD in v1.1)</div>
+                              <button onClick={() => openExercisePicker(block.blockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 p-2"><Plus className="w-4 h-4" /> Add exercise to superset</button>
                             </div>
                           )}
                           {block.type === "CIRCUIT" && (
                             <div className="space-y-4">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm">Rounds:</span>
-                                <input type="number" className="w-16 bg-hv-bg border border-hv-border rounded px-2 py-1 text-sm" value={block.rounds || 3} onChange={(e) => {
-                                  const updated = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, rounds: Number(e.target.value) } : b);
-                                  setWorkout({ ...workout, blocks: updated as any[] });
+                                <input type="number" min={1} max={99} aria-label="Circuit rounds" className="w-16 bg-hv-bg border border-hv-border rounded px-2 py-1 text-sm" value={block.rounds} onChange={(e) => {
+                                  const rounds = Math.max(1, Math.min(99, Number(e.target.value) || 1));
+                                  const updated = workout.blocks.map(b => b.blockId === block.blockId && b.type === "CIRCUIT" ? { ...b, rounds } : b);
+                                  setWorkout({ ...workout, blocks: updated });
                                 }} />
                               </div>
                               <p className="text-sm text-hv-text-muted">A circuit repeats all exercises for the specified rounds.</p>
-                              {block.exercises && block.exercises.map((exBlock, i) => (
-                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
-                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
-                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                              {block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border flex items-center gap-2">
+                                  <div className="flex-1">
+                                    <div className="font-medium mb-1">{exBlock.exerciseNameSnapshot}</div>
+                                    <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
+                                  </div>
+                                  <button onClick={() => moveGroupedExercise(block.blockId, i, "up")} disabled={i === 0} aria-label={`Move ${exBlock.exerciseNameSnapshot} up`} className="p-2 disabled:opacity-30"><ChevronUp className="w-4 h-4" /></button>
+                                  <button onClick={() => moveGroupedExercise(block.blockId, i, "down")} disabled={i === block.exercises.length - 1} aria-label={`Move ${exBlock.exerciseNameSnapshot} down`} className="p-2 disabled:opacity-30"><ChevronDown className="w-4 h-4" /></button>
+                                  <button onClick={() => removeGroupedExercise(block.blockId, exBlock.blockId)} aria-label={`Remove ${exBlock.exerciseNameSnapshot} from circuit`} className="p-2 text-hv-error"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               ))}
+                              <button onClick={() => openExercisePicker(block.blockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 p-2"><Plus className="w-4 h-4" /> Add exercise to circuit</button>
                             </div>
                           )}
 
@@ -380,7 +435,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
         <div className="flex flex-col sm:flex-row gap-4 mt-8 flex-wrap">
           <button
-            onClick={() => setIsExerciseDrawerOpen(true)}
+            onClick={() => openExercisePicker()}
             className="flex-1 border-2 border-dashed border-hv-border hover:border-hv-primary text-hv-text-muted hover:text-hv-primary rounded-lg p-4 flex items-center justify-center gap-2 transition-colors"
           >
             <Plus className="w-5 h-5" />
@@ -456,7 +511,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
         <ExercisePicker
           exercises={exercisesData}
           onSelect={addExercise}
-          onClose={() => setIsExerciseDrawerOpen(false)}
+          onClose={() => { setExerciseTargetGroupId(null); setIsExerciseDrawerOpen(false); }}
         />
       )}
     </div>
