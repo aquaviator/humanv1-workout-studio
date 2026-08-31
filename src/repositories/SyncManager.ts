@@ -1,6 +1,7 @@
 import { get, set, keys, setMany } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
 import { db } from '../config/firebase';
+import { env } from '../config/env';
 import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
 
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
@@ -40,6 +41,7 @@ export class SyncManager {
 
   async syncPending(): Promise<void> {
     if (!this.isOnline) return;
+    if (env.firebase.apiKey === 'fake-api-key' && !env.useEmulator) return;
 
     const allKeys = await keys();
     const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('sync_'));
@@ -54,6 +56,7 @@ export class SyncManager {
 
   async syncDown(humanUserId: string, types: ('workout' | 'plan' | 'protocol')[] = ['workout', 'plan', 'protocol']): Promise<void> {
     if (!this.isOnline) return;
+    if (env.firebase.apiKey === 'fake-api-key' && !env.useEmulator) return;
 
     for (const type of types) {
       const q = query(collection(db, 'humans', humanUserId, `${type}s`));
@@ -87,6 +90,7 @@ export class SyncManager {
   }
 
   private async uploadRecord(key: string, record: SyncRecord) {
+    if (env.firebase.apiKey === 'fake-api-key' && !env.useEmulator) return;
     const { envelope, type } = record;
     const docRef = doc(db, 'humans', envelope.humanUserId, `${type}s`, envelope.globalId);
 
