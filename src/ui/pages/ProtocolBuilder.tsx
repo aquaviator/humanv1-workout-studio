@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Protocol, ProtocolSegment } from "../../domain/types";
-import { Plus, Trash2, Undo2, Redo2 } from "lucide-react";
+import { Plus, Trash2, Undo2, Redo2, AlertCircle } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
+import { validateProtocol } from "../../domain/validation/protocolValidation";
+import { AthleteProtocolPreview } from "../components/AthleteProtocolPreview";
 
 export default function ProtocolBuilder({ identity }: { identity: HumanIdentity }) {
   const [protocolId] = useState(() => uuidv4());
@@ -28,6 +30,9 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
   const { state: protocol, set: setProtocol, reset, undo, redo, canUndo, canRedo } = useHistory<Protocol>(initialProtocol);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"builder" | "preview">("builder");
+
+  const validationErrors = useMemo(() => validateProtocol(protocol), [protocol]);
 
   useEffect(() => {
     let mounted = true;
@@ -121,7 +126,46 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
         </div>
       </div>
 
+      <div className="px-4 md:px-8 border-b border-hv-border flex gap-4 pt-4">
+        <button 
+          className={`pb-2 px-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'builder' ? 'border-hv-primary text-hv-primary' : 'border-transparent text-hv-text-muted hover:text-hv-text'}`}
+          onClick={() => setActiveTab('builder')}
+        >
+          Builder
+        </button>
+        <button 
+          className={`pb-2 px-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'preview' ? 'border-hv-primary text-hv-primary' : 'border-transparent text-hv-text-muted hover:text-hv-text'}`}
+          onClick={() => setActiveTab('preview')}
+        >
+          Preview
+          {validationErrors.length > 0 && (
+            <span className="bg-hv-error text-white text-[10px] w-4 h-4 flex items-center justify-center rounded-full">
+              {validationErrors.length}
+            </span>
+          )}
+        </button>
+      </div>
+
       <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+        {validationErrors.length > 0 && activeTab === 'builder' && (
+          <div className="max-w-2xl mx-auto mb-6 p-4 bg-hv-surface-2 border border-hv-error rounded-lg text-sm">
+            <div className="flex items-center gap-2 text-hv-error font-medium mb-2">
+              <AlertCircle className="w-4 h-4" />
+              <span>Validation Errors</span>
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-hv-text-muted">
+              {validationErrors.map((err, idx) => (
+                <li key={idx}>
+                  {err.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {activeTab === 'preview' ? (
+          <AthleteProtocolPreview protocol={protocol} />
+        ) : (
         <div className="max-w-2xl mx-auto">
           
           <h2 className="text-xl font-bold mb-4">Timeline Segments</h2>
@@ -196,6 +240,7 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

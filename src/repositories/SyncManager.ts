@@ -135,6 +135,16 @@ export class SyncManager {
       await set(key, record);
     }
   }
+  async listSyncRecords(humanUserId: string, type: 'workout' | 'plan' | 'protocol'): Promise<SyncRecord[]> {
+    const allKeys = await keys();
+    const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`sync_${humanUserId}_${type}_`));
+    const records: SyncRecord[] = [];
+    for (const key of syncKeys) {
+      const record = await get<SyncRecord>(key as string);
+      if (record) records.push(record);
+    }
+    return records;
+  }
 }
 
 export const syncManager = new SyncManager();

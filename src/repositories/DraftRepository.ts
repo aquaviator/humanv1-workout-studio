@@ -73,6 +73,19 @@ export class DraftRepository {
     }
   }
 
+  async listWorkoutEnvelopes(userId: string): Promise<DraftEnvelope<Workout>[]> {
+    const allKeys = await keys();
+    const workoutKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`drafts_${userId}_workout_`));
+    const envelopes: DraftEnvelope<Workout>[] = [];
+    for (const key of workoutKeys) {
+      const draft = await get<DraftEnvelope<Workout>>(key as string);
+      if (draft) {
+        envelopes.push(draft);
+      }
+    }
+    return envelopes;
+  }
+
   // --- PLANS ---
   async savePlanDraft(userId: string, plan: Plan): Promise<void> {
     const key = this.getStoreKey(userId, 'plan', plan.planId);
