@@ -3,7 +3,7 @@ import { Workout, Plan, Protocol } from '../domain/types';
 import { syncManager } from './SyncManager';
 
 export interface DraftEnvelope<T> {
-  schemaVersion: string;
+  schemaVersion: number;
   globalId: string;
   humanUserId: string;
   revision: number;
@@ -26,7 +26,7 @@ export class DraftRepository {
     let currentDraft = await get<DraftEnvelope<Workout>>(key);
     const now = new Date().toISOString();
     const envelope: DraftEnvelope<Workout> = {
-      schemaVersion: "1",
+      schemaVersion: 1,
       globalId: workout.workoutId,
       humanUserId: userId,
       revision: currentDraft ? currentDraft.revision + 1 : 1,
@@ -79,7 +79,7 @@ export class DraftRepository {
     let currentDraft = await get<DraftEnvelope<Plan>>(key);
     const now = new Date().toISOString();
     const envelope: DraftEnvelope<Plan> = {
-      schemaVersion: "1",
+      schemaVersion: 1,
       globalId: plan.planId,
       humanUserId: userId,
       revision: currentDraft ? currentDraft.revision + 1 : 1,
@@ -132,7 +132,7 @@ export class DraftRepository {
     let currentDraft = await get<DraftEnvelope<Protocol>>(key);
     const now = new Date().toISOString();
     const envelope: DraftEnvelope<Protocol> = {
-      schemaVersion: "1",
+      schemaVersion: 1,
       globalId: protocol.protocolId,
       humanUserId: userId,
       revision: currentDraft ? currentDraft.revision + 1 : 1,

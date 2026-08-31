@@ -10,6 +10,8 @@ export interface SyncRecord {
   envelope: DraftEnvelope<any>;
   status: SyncStatus;
   type: 'workout' | 'plan' | 'protocol';
+  lastError?: string;
+  acknowledgedRevision?: number;
 }
 
 export class SyncManager {
@@ -41,14 +43,14 @@ export class SyncManager {
 
   async syncPending(): Promise<void> {
     if (!this.isOnline) return;
-    if (env.firebase.apiKey === '' && !env.useEmulator) return;
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
 
     const allKeys = await keys();
     const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('sync_'));
 
     for (const key of syncKeys) {
       const record = await get<SyncRecord>(key as string);
-      if (record && record.status === 'PENDING') {
+      if (record && (record.status === 'PENDING' || record.status === 'FAILED')) {
         await this.uploadRecord(key as string, record);
       }
     }
@@ -56,10 +58,10 @@ export class SyncManager {
 
   async syncDown(humanUserId: string, types: ('workout' | 'plan' | 'protocol')[] = ['workout', 'plan', 'protocol']): Promise<void> {
     if (!this.isOnline) return;
-    if (env.firebase.apiKey === '' && !env.useEmulator) return;
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
 
     for (const type of types) {
-      const q = query(collection(db, 'humans', humanUserId, `${type}s`));
+      const q = query(collection(db, 'users', humanUserId, `${type}Drafts`));
       const snap = await getDocs(q);
       
       const localPrefix = `drafts_${humanUserId}_${type}_`;
@@ -71,13 +73,19 @@ export class SyncManager {
         const localData = await get<DraftEnvelope<any>>(localKey);
         
         // Exact revision handling, Replay protection
-        if (!localData || remoteData.revision > localData.revision) {
+        const syncKey = `sync_${humanUserId}_${type}_${remoteData.globalId}`;
+        const syncRecord = await get<SyncRecord>(syncKey);
+        if (syncRecord?.status === 'PENDING' || syncRecord?.status === 'FAILED') {
+          if (remoteData.revision >= syncRecord.envelope.revision) {
+            syncRecord.status = 'CONFLICT';
+            syncRecord.lastError = 'REMOTE_CHANGED_WHILE_LOCAL_PENDING';
+            setOps.push([syncKey, syncRecord]);
+          }
+        } else if (!localData || remoteData.revision > localData.revision) {
           setOps.push([localKey, remoteData]);
-          
-          const syncKey = `sync_${humanUserId}_${type}_${remoteData.globalId}`;
-          const syncRecord = await get<SyncRecord>(syncKey);
           if (syncRecord && syncRecord.envelope.revision < remoteData.revision) {
              syncRecord.status = 'SYNCED';
+             syncRecord.acknowledgedRevision = remoteData.revision;
              setOps.push([syncKey, syncRecord]);
           }
         }
@@ -90,9 +98,9 @@ export class SyncManager {
   }
 
   private async uploadRecord(key: string, record: SyncRecord) {
-    if (env.firebase.apiKey === '' && !env.useEmulator) return;
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
     const { envelope, type } = record;
-    const docRef = doc(db, 'humans', envelope.humanUserId, `${type}s`, envelope.globalId);
+    const docRef = doc(db, 'users', envelope.humanUserId, `${type}Drafts`, envelope.globalId);
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -107,7 +115,7 @@ export class SyncManager {
           if (remoteData.revision > envelope.revision) {
             throw new Error("REVISION_CONFLICT");
           } else if (remoteData.revision === envelope.revision) {
-            // Already uploaded, idempotent
+            if (JSON.stringify(remoteData) !== JSON.stringify(envelope)) throw new Error('REVISION_COLLISION');
             return;
           }
         }
@@ -116,17 +124,19 @@ export class SyncManager {
 
       // On success
       record.status = 'SYNCED';
+      record.acknowledgedRevision = envelope.revision;
+      delete record.lastError;
       await set(key, record);
     } catch (e: any) {
       console.error("Sync upload failed", e);
-      if (e.message === 'REVISION_CONFLICT' || e.message === 'OWNERSHIP_CONFLICT') {
+      if (e.message === 'REVISION_CONFLICT' || e.message === 'OWNERSHIP_CONFLICT' || e.message === 'REVISION_COLLISION') {
         record.status = 'CONFLICT';
-        await set(key, record);
+        record.lastError = e.message;
       } else {
-        // Network or other error, stay pending
-        record.status = 'FAILED'; 
-        // We will retry on next online event
+        record.status = 'FAILED';
+        record.lastError = e instanceof Error ? e.message : 'UPLOAD_FAILED';
       }
+      await set(key, record);
     }
   }
 }
