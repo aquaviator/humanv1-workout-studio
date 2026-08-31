@@ -1,5 +1,7 @@
 const raw = import.meta.env;
-const useEmulator = raw.VITE_USE_FIREBASE_EMULATOR === 'true';
+// Reference this flag directly so Vite can remove emulator-only branches from
+// production bundles when VITE_USE_FIREBASE_EMULATOR is explicitly false.
+const useEmulator = import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true';
 const required = (name: keyof ImportMetaEnv): string => {
   const value = raw[name];
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`Missing required environment variable: ${name}`);

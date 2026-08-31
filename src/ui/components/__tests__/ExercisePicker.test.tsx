@@ -13,6 +13,7 @@ const mockExercises = [
     equipment: ["Barbell"],
     muscleArea: ["Chest"],
     movementPattern: ["Horizontal Push"]
+    ,metricProfile: { primary: ['repetition_count', 'external_load'] }
   },
   {
     exerciseId: "ex2",
@@ -67,6 +68,16 @@ test('search normalization (case, accents, punctuation)', async () => {
   await userEvent.type(searchInput, 'developpe');
   expect(screen.getByText('Développé Couché')).toBeInTheDocument();
   expect(screen.queryByText('Bench Press')).not.toBeInTheDocument();
+});
+
+test('search includes scientific catalogue tokens and metric capabilities', async () => {
+  render(<ExercisePicker exercises={mockExercises as any} onSelect={() => {}} onClose={() => {}} />);
+  const searchInput = screen.getByPlaceholderText(/Search exercises/i);
+  await userEvent.type(searchInput, 'horizontal push');
+  expect(screen.getByText('Bench Press')).toBeInTheDocument();
+  await userEvent.clear(searchInput);
+  await userEvent.type(searchInput, 'external load');
+  expect(screen.getByText('Bench Press')).toBeInTheDocument();
 });
 
 test('filter semantics (OR within group, AND between groups)', async () => {

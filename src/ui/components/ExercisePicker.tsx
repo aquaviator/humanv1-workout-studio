@@ -36,6 +36,7 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
       modalitySuitability: new Set(),
       technicalComplexity: new Set(),
       riskIndicators: new Set(),
+      metricCapabilities: new Set(),
     };
 
     exercises.forEach(ex => {
@@ -50,6 +51,8 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
       if (ex.modalitySuitability) ex.modalitySuitability.forEach(m => opts.modalitySuitability.add(m));
       if (ex.technicalComplexity) opts.technicalComplexity.add(ex.technicalComplexity);
       if (ex.riskIndicators) ex.riskIndicators.forEach(r => opts.riskIndicators.add(r));
+      const profile = ex.metricProfile as { primary?: string[]; secondary?: string[]; optional?: string[] } | undefined;
+      [...(profile?.primary || []), ...(profile?.secondary || []), ...(profile?.optional || [])].forEach(metric => opts.metricCapabilities.add(metric));
     });
 
     return Object.fromEntries(Object.entries(opts).map(([k, v]) => [k, Array.from(v).sort()]));
@@ -77,11 +80,21 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
     return exercises.filter(ex => {
       // 1. Search text
       if (normalizedQuery) {
+        const profile = ex.metricProfile as { primary?: string[]; secondary?: string[]; optional?: string[] } | undefined;
         const searchTarget = normalize([
           ex.name,
           ...(ex.aliases || []),
           ex.category,
-          ...(ex.equipment || [])
+          ...(ex.equipment || []),
+          ...(ex.muscleArea || []),
+          ...(ex.primaryMuscles || []),
+          ...(ex.secondaryMuscles || []),
+          ...(ex.movementPattern || []),
+          ...(ex.modalitySuitability || []),
+          ...(ex.tags || []),
+          ...(profile?.primary || []),
+          ...(profile?.secondary || []),
+          ...(profile?.optional || []),
         ].join(' '));
         if (!searchTarget.includes(normalizedQuery)) return false;
       }
@@ -89,7 +102,10 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
       // 2. Filters (AND between groups, OR within group)
       for (const [group, values] of Object.entries(activeFilters)) {
         if (values.length === 0) continue;
-        const exValue = ex[group as keyof Exercise];
+        const profile = ex.metricProfile as { primary?: string[]; secondary?: string[]; optional?: string[] } | undefined;
+        const exValue = group === 'metricCapabilities'
+          ? [...(profile?.primary || []), ...(profile?.secondary || []), ...(profile?.optional || [])]
+          : ex[group as keyof Exercise];
         
         if (Array.isArray(exValue)) {
           if (!exValue.some(v => values.includes(v))) return false;
@@ -139,6 +155,7 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
     { key: 'modalitySuitability', label: 'Modality' },
     { key: 'technicalComplexity', label: 'Complexity' },
     { key: 'riskIndicators', label: 'Risk Indicators' }
+    ,{ key: 'metricCapabilities', label: 'Recorded Metrics' }
   ];
 
   const quickCategories = ['Strength', 'Cardio', 'HIIT', 'Mobility', 'Warm-up', 'Circuit'];

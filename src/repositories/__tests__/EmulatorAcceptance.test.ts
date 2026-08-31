@@ -146,7 +146,7 @@ describe('Emulator Acceptance', () => {
     // Reconnection and sync
     await syncManager.syncPending();
     
-    const remote = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_shared_1'));
+    const remote = await getDoc(doc(db, 'users', 'human_1', 'workoutDrafts', 'workout_shared_1'));
     expect(remote.exists()).toBe(true);
     expect(remote.data().payload.title).toBe("Base Workout");
     
@@ -173,7 +173,7 @@ describe('Emulator Acceptance', () => {
     
     // Client B syncs up (revision becomes 2)
     await syncManager.syncPending();
-    const remoteAfterB = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_shared_1'));
+    const remoteAfterB = await getDoc(doc(db, 'users', 'human_1', 'workoutDrafts', 'workout_shared_1'));
     expect(remoteAfterB.data().revision).toBe(2);
     expect(remoteAfterB.data().payload.title).toBe("Client B Edit");
     
@@ -197,7 +197,7 @@ describe('Emulator Acceptance', () => {
     await syncManager.syncPending();
     
     // Remote should still be Client B's edit
-    const remoteAfterConflict = await getDoc(doc(db, 'humans', 'human_1', 'workouts', 'workout_shared_1'));
+    const remoteAfterConflict = await getDoc(doc(db, 'users', 'human_1', 'workoutDrafts', 'workout_shared_1'));
     expect(remoteAfterConflict.data().revision).toBe(2);
     expect(remoteAfterConflict.data().payload.title).toBe("Client B Edit");
     

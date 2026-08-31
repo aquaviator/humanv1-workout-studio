@@ -41,7 +41,22 @@ function asExercise(value: Json): Exercise {
     equipment: Array.isArray(value.equipment) ? value.equipment.filter((v): v is string => typeof v === 'string') : [],
     aliases: Array.isArray(value.aliases) ? value.aliases.filter((v): v is string => typeof v === 'string') : [],
     metricProfile: value.metricProfile,
+    primaryMuscles: strings(value.primaryMuscles),
+    secondaryMuscles: strings(value.secondaryMuscles),
+    muscleArea: strings(value.muscleArea),
+    movementPattern: strings(value.movementPattern),
+    environment: strings(value.environment),
+    laterality: typeof value.laterality === 'string' ? value.laterality : undefined,
+    modalitySuitability: strings(value.modalitySuitability),
+    technicalComplexity: typeof value.technicalComplexity === 'string' ? value.technicalComplexity : undefined,
+    riskIndicators: strings(value.riskIndicators),
+    specialistReview: typeof value.specialistReview === 'boolean' ? value.specialistReview : undefined,
+    tags: strings(value.tags),
   };
+}
+
+function strings(value: Json | undefined): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
 }
 
 export class FirebaseCatalogueRepository implements CatalogueRepository {
