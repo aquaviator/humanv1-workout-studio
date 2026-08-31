@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { axe } from 'jest-axe';
 import WorkoutBuilder from '../WorkoutBuilder';
 import { HumanIdentity } from '../../../domain/identity';
@@ -46,5 +46,32 @@ describe('WorkoutBuilder', () => {
     const addButton = screen.getByText('Add Exercise');
     fireEvent.click(addButton);
     expect(screen.getByText('Library')).toBeInTheDocument();
+  });
+
+  it('adds, reorders and removes exercises inside a superset', async () => {
+    render(<WorkoutBuilder identity={mockIdentity} />);
+    fireEvent.click(screen.getByText('Add Superset'));
+
+    fireEvent.click(screen.getByText('Add exercise to superset'));
+    fireEvent.click(await screen.findByText('Bench Press'));
+    await waitFor(() => expect(screen.getByText('Bench Press')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Add exercise to superset'));
+    fireEvent.click(await screen.findByText('Treadmill Run'));
+    await waitFor(() => expect(screen.getByLabelText('Move Treadmill Run up')).toBeEnabled());
+
+    fireEvent.click(screen.getByLabelText('Move Treadmill Run up'));
+    fireEvent.click(screen.getByLabelText('Remove Bench Press from superset'));
+    expect(screen.queryByLabelText('Remove Bench Press from superset')).not.toBeInTheDocument();
+  });
+
+  it('keeps circuit rounds within the supported range', () => {
+    render(<WorkoutBuilder identity={mockIdentity} />);
+    fireEvent.click(screen.getByText('Add Circuit'));
+    const rounds = screen.getByLabelText('Circuit rounds');
+    fireEvent.change(rounds, { target: { value: '0' } });
+    expect(rounds).toHaveValue(1);
+    fireEvent.change(rounds, { target: { value: '150' } });
+    expect(rounds).toHaveValue(99);
   });
 });
