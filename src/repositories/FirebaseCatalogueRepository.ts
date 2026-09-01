@@ -40,7 +40,7 @@ function asExercise(value: Json): Exercise {
     category: typeof value.category === 'string' ? value.category : '',
     equipment: Array.isArray(value.equipment) ? value.equipment.filter((v): v is string => typeof v === 'string') : [],
     aliases: Array.isArray(value.aliases) ? value.aliases.filter((v): v is string => typeof v === 'string') : [],
-    metricProfile: value.metricProfile,
+    metricProfile: value.metricProfile as any,
     primaryMuscles: strings(value.primaryMuscles),
     secondaryMuscles: strings(value.secondaryMuscles),
     muscleArea: strings(value.muscleArea),

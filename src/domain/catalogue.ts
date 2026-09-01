@@ -1,10 +1,17 @@
+export interface MetricProfile {
+  primary: string[];
+  secondary: string[];
+  optional: string[];
+  unsupported: string[];
+}
+
 export interface Exercise {
   exerciseId: string;
   name: string;
   category: string;
   equipment: string[];
   aliases: string[];
-  metricProfile?: any;
+  metricProfile: MetricProfile;
   primaryMuscles?: string[];
   secondaryMuscles?: string[];
   muscleArea?: string[];

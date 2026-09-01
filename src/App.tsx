@@ -1,279 +1,59 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router";
 import { LayoutDashboard, Dumbbell, CalendarRange, Library, Settings, LogIn, Activity, LogOut } from "lucide-react";
 import { cn } from "./lib/utils";
-import React, { useState, useEffect } from "react";
-import WorkoutBuilder from "./ui/pages/WorkoutBuilder";
-import PlanBuilder from "./ui/pages/PlanBuilder";
-import ProtocolBuilder from "./ui/pages/ProtocolBuilder";
+import React, { useState, useEffect, Suspense } from "react";
 import { authRepository } from "./repositories/AuthManager";
 import { HumanIdentity } from "./domain/identity";
+
+const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
+const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
+const ProtocolBuilder = React.lazy(() => import("./ui/pages/ProtocolBuilder"));
+const Dashboard = React.lazy(() => import("./ui/pages/Dashboard"));
+const WorkoutsList = React.lazy(() => import("./ui/pages/WorkoutsList"));
+const PlansList = React.lazy(() => import("./ui/pages/PlansList"));
+const ExerciseLibrary = React.lazy(() => import("./ui/pages/ExerciseLibrary"));
+const ProtocolLibrary = React.lazy(() => import("./ui/pages/ProtocolLibrary"));
+const AccountSettings = React.lazy(() => import("./ui/pages/AccountSettings"));
+const ConflictCentre = React.lazy(() => import("./ui/pages/ConflictCentre"));
 
 function Navigation() {
   const location = useLocation();
   const navItems = [
-    { name: "Dashboard", path: "/", icon: LayoutDashboard },
-    { name: "Workouts", path: "/workouts", icon: Dumbbell },
-    { name: "Plans", path: "/plans", icon: CalendarRange },
-    { name: "Exercise Library", path: "/library/exercises", icon: Library },
-    { name: "Protocol Library", path: "/library/protocols", icon: Activity },
+    { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+    { icon: Dumbbell, label: "Workouts", path: "/workouts" },
+    { icon: CalendarRange, label: "Plans", path: "/plans" },
+    { icon: Library, label: "Exercises", path: "/library/exercises" },
+    { icon: Activity, label: "Protocols", path: "/library/protocols" },
+    { icon: Activity, label: "Conflicts", path: "/conflicts" },
+    { icon: Settings, label: "Account", path: "/account" },
   ];
 
   return (
-    <nav className="flex flex-col gap-2 p-4 border-r border-hv-border bg-hv-surface-1 w-64 h-full hidden md:flex">
-      <div className="mb-8 px-2 text-xl font-semibold text-hv-text">
-        Workout Studio
+    <nav className="w-64 border-r border-hv-border bg-hv-surface-1 flex flex-col">
+      <div className="p-6">
+        <h2 className="text-xl font-bold tracking-tight">Workout Studio</h2>
       </div>
-      {navItems.map((item) => (
-        <Link
-          key={item.path}
-          to={item.path}
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-            location.pathname === item.path
-              ? "bg-hv-primary text-white"
-              : "text-hv-text-muted hover:bg-hv-surface-2 hover:text-hv-text"
-          )}
-        >
-          <item.icon className="w-5 h-5" />
-          <span>{item.name}</span>
-        </Link>
-      ))}
-      <div className="mt-auto">
-        <Link
-          to="/account"
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-            location.pathname === "/account"
-              ? "bg-hv-primary text-white"
-              : "text-hv-text-muted hover:bg-hv-surface-2 hover:text-hv-text"
-          )}
-        >
-          <Settings className="w-5 h-5" />
-          <span>Account</span>
-        </Link>
+      <div className="flex-1 px-4 space-y-2">
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path));
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+                isActive 
+                  ? "bg-hv-primary/10 text-hv-primary font-medium" 
+                  : "text-hv-text-muted hover:text-hv-text hover:bg-hv-surface-2"
+              )}
+            >
+              <item.icon className="w-5 h-5" />
+              {item.label}
+            </Link>
+          );
+        })}
       </div>
     </nav>
-  );
-}
-
-// Pages placeholders
-import { draftRepository } from "./repositories/DraftRepository";
-import { catalogueRepository } from "./repositories/FirebaseCatalogueRepository";
-import { entitlementRepository } from "./repositories/FirebaseEntitlementRepository";
-import { Entitlement } from "./domain/entitlement";
-import { Workout, Plan, Protocol } from "./domain/types";
-import { Exercise } from "./domain/catalogue";
-
-function Dashboard({ identity }: { identity: HumanIdentity }) {
-  const [workoutsCount, setWorkoutsCount] = useState(0);
-  const [plansCount, setPlansCount] = useState(0);
-  useEffect(() => {
-    draftRepository.listWorkoutDrafts(identity.humanUserId).then(d => setWorkoutsCount(d.length));
-    draftRepository.listPlanDrafts(identity.humanUserId).then(d => setPlansCount(d.length));
-  }, [identity.humanUserId]);
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg">
-          <h2 className="font-semibold text-hv-text-muted mb-2">Recent Workouts</h2>
-          <div className="text-2xl font-bold">{workoutsCount}</div>
-        </div>
-        <div className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg">
-          <h2 className="font-semibold text-hv-text-muted mb-2">Active Plans</h2>
-          <div className="text-2xl font-bold">{plansCount}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkoutsList({ identity }: { identity: HumanIdentity }) {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
-  useEffect(() => {
-    draftRepository.listWorkoutDrafts(identity.humanUserId).then(setWorkouts);
-  }, [identity.humanUserId]);
-  return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Workouts</h1>
-        <Link to="/workouts/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
-          Create Workout
-        </Link>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {workouts.map(workout => (
-          <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col cursor-pointer hover:border-hv-primary transition-colors">
-            <h2 className="font-semibold mb-1">{workout.title}</h2>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs bg-hv-surface-2 px-2 py-1 rounded text-hv-text-muted uppercase tracking-wider font-semibold">
-                {workout.discipline}
-              </span>
-              <span className="text-xs text-hv-text-muted">
-                {Math.round((workout.estimatedDurationSeconds || 0) / 60)} min
-              </span>
-            </div>
-            <p className="text-sm text-hv-text-muted line-clamp-2 mt-auto">
-              {workout.description || "No description provided."}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PlansList({ identity }: { identity: HumanIdentity }) {
-  const [plans, setPlans] = useState<Plan[]>([]);
-  useEffect(() => {
-    draftRepository.listPlanDrafts(identity.humanUserId).then(setPlans);
-  }, [identity.humanUserId]);
-  return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Plans</h1>
-        <Link to="/plans/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
-          Create Plan
-        </Link>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {plans.map(plan => (
-          <div key={plan.planId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg cursor-pointer hover:border-hv-primary transition-colors">
-            <h2 className="font-semibold mb-2">{plan.title}</h2>
-            <p className="text-sm text-hv-text-muted mb-4">{plan.description}</p>
-            <div className="text-xs text-hv-text-muted bg-hv-surface-2 inline-block px-2 py-1 rounded">
-              {plan.weeks.length} {plan.weeks.length === 1 ? 'week' : 'weeks'}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ExerciseLibrary() {
-  const [exercisesData, setExercises] = useState<Exercise[]>([]);
-  useEffect(() => {
-    catalogueRepository.getExercises().then(setExercises);
-  }, []);
-  const [search, setSearch] = React.useState("");
-  
-  const filtered = exercisesData.filter(ex => 
-    ex.name.toLowerCase().includes(search.toLowerCase()) ||
-    ex.aliases.some(a => a.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  return (
-    <div className="p-8 h-full flex flex-col">
-      <h1 className="text-2xl font-bold mb-6">Exercise Library</h1>
-      <input 
-        type="text" 
-        placeholder="Search exercises..." 
-        className="w-full max-w-md bg-hv-surface-1 border border-hv-border rounded-md px-4 py-2 mb-6 focus:outline-none focus:border-hv-primary text-hv-text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto">
-        {filtered.map(ex => (
-          <div key={ex.exerciseId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
-            <h3 className="font-semibold mb-1">{ex.name}</h3>
-            <div className="text-sm text-hv-text-muted mb-3 flex-grow">{ex.category}</div>
-            <div className="flex gap-2 flex-wrap">
-              {ex.equipment.map(eq => (
-                <span key={eq} className="text-xs bg-hv-surface-2 px-2 py-1 rounded text-hv-text-muted">
-                  {eq}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProtocolLibrary({ identity }: { identity: HumanIdentity }) {
-  const [protocols, setProtocols] = useState<Protocol[]>([]);
-  useEffect(() => {
-    draftRepository.listProtocolDrafts(identity.humanUserId).then(setProtocols);
-  }, [identity.humanUserId]);
-  const [search, setSearch] = React.useState("");
-  
-  const filtered = protocols.filter(p => 
-    p.title.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="p-8 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Protocol Library</h1>
-        <Link to="/protocols/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
-          Create Protocol
-        </Link>
-      </div>
-      <input 
-        type="text" 
-        placeholder="Search protocols..." 
-        className="w-full max-w-md bg-hv-surface-1 border border-hv-border rounded-md px-4 py-2 mb-6 focus:outline-none focus:border-hv-primary text-hv-text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto">
-        {filtered.map(p => (
-          <div key={p.protocolId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
-            <h3 className="font-semibold mb-1">{p.title}</h3>
-            <div className="text-sm text-hv-text-muted mb-3 flex-grow">{p.protocolType}</div>
-            <p className="text-sm text-hv-text-muted mb-3 line-clamp-3">{p.summary}</p>
-            <div className="flex gap-2 flex-wrap mt-auto">
-              {p.suitability.map(s => (
-                <span key={s} className="text-xs bg-hv-surface-2 px-2 py-1 rounded text-hv-text-muted">
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AccountSettings({ identity }: { identity: HumanIdentity }) {
-  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
-  useEffect(() => {
-    return entitlementRepository.onEntitlementChanged(identity.humanUserId, setEntitlement);
-  }, [identity.humanUserId]);
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-6">Account</h1>
-      <div className="bg-hv-surface-1 border border-hv-border p-6 rounded-lg max-w-md">
-        <h2 className="text-xl font-semibold mb-4">Profile</h2>
-        <div className="mb-4">
-          <div className="text-sm text-hv-text-muted">Display Name</div>
-          <div>{identity.displayName}</div>
-        </div>
-        <div className="mb-4">
-          <div className="text-sm text-hv-text-muted">Email</div>
-          <div>{identity.email}</div>
-        </div>
-        <div className="mb-4">
-          <div className="text-sm text-hv-text-muted">Entitlement</div>
-          <div>{entitlement ? entitlement.state : "LOADING..."}</div>
-        </div>
-        <div className="mb-8">
-          <div className="text-sm text-hv-text-muted">User ID</div>
-          <div className="text-xs font-mono bg-hv-surface-2 p-2 rounded mt-1 overflow-x-auto">{identity.humanUserId}</div>
-        </div>
-        
-        <button 
-          onClick={() => authRepository.signOut()}
-          className="flex items-center gap-2 px-4 py-2 border border-hv-error text-hv-error hover:bg-hv-error hover:text-white rounded-md transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -327,17 +107,21 @@ export default function App() {
       <div className="flex h-screen bg-hv-bg text-hv-text overflow-hidden">
         <Navigation />
         <main className="flex-1 overflow-y-auto relative">
-          <Routes>
-            <Route path="/" element={<Dashboard identity={identity} />} />
-            <Route path="/workouts" element={<WorkoutsList identity={identity} />} />
-            <Route path="/workouts/new" element={<WorkoutBuilder identity={identity} />} />
-            <Route path="/plans" element={<PlansList identity={identity} />} />
-            <Route path="/plans/new" element={<PlanBuilder identity={identity} />} />
-            <Route path="/library/exercises" element={<ExerciseLibrary />} />
-            <Route path="/library/protocols" element={<ProtocolLibrary identity={identity} />} />
-            <Route path="/protocols/new" element={<ProtocolBuilder identity={identity} />} />
-            <Route path="/account" element={<AccountSettings identity={identity} />} />
-          </Routes>
+          <Suspense fallback={<div className="p-8 text-hv-text-muted">Loading...</div>}>
+            <Routes>
+              <Route path="/" element={<Dashboard identity={identity} />} />
+              <Route path="/workouts" element={<WorkoutsList identity={identity} />} />
+              <Route path="/workouts/new" element={<WorkoutBuilder identity={identity} />} />
+              <Route path="/workouts/:workoutId" element={<WorkoutBuilder identity={identity} />} />
+              <Route path="/plans" element={<PlansList identity={identity} />} />
+              <Route path="/plans/new" element={<PlanBuilder identity={identity} />} />
+              <Route path="/library/exercises" element={<ExerciseLibrary />} />
+              <Route path="/library/protocols" element={<ProtocolLibrary identity={identity} />} />
+              <Route path="/protocols/new" element={<ProtocolBuilder identity={identity} />} />
+              <Route path="/conflicts" element={<ConflictCentre identity={identity} />} />
+              <Route path="/account" element={<AccountSettings identity={identity} />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </BrowserRouter>
