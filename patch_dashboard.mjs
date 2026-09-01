@@ -1,4 +1,6 @@
+import fs from 'fs';
 
+let content = `
 import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router";
 import { HumanIdentity } from "../../domain/identity";
@@ -82,7 +84,7 @@ export default function Dashboard({ identity }: { identity: HumanIdentity }) {
                        <td className="py-3 px-3">{pub.revision}</td>
                        <td className="py-3 px-3 text-hv-text-muted">{(pub.compatibleTags || []).join(', ')}</td>
                        <td className="py-3 px-3">
-                         <span className={`px-2 py-1 rounded text-xs font-medium ${getStatus(pub) === 'Available' ? 'bg-hv-primary/20 text-hv-primary' : 'bg-hv-surface-2'}`}>
+                         <span className={\`px-2 py-1 rounded text-xs font-medium \${getStatus(pub) === 'Available' ? 'bg-hv-primary/20 text-hv-primary' : 'bg-hv-surface-2'}\`}>
                            {getStatus(pub)}
                          </span>
                        </td>
@@ -96,3 +98,6 @@ export default function Dashboard({ identity }: { identity: HumanIdentity }) {
     </div>
   );
 }
+`;
+
+fs.writeFileSync('src/ui/pages/Dashboard.tsx', content);

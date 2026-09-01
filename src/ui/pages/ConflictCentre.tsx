@@ -108,7 +108,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2 text-hv-error">
                   <AlertCircle className="w-5 h-5" />
-                  <span className="font-semibold">{conflict.lastError || "Sync Conflict"}</span>
+                  <span className="font-semibold">{conflict.lastErrorCode || "Sync Conflict"}</span>
                 </div>
                 <div className="text-hv-text">
                   <span className="capitalize font-medium">{conflict.type}</span>: {conflict.envelope.payload.title || "Untitled"}

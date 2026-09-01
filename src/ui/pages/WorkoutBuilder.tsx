@@ -1,3 +1,5 @@
+import { PublishedEnvelope } from "../../domain/publication";
+import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
@@ -37,7 +39,31 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'builder' | 'preview'>('builder');
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
-  const [publishStatus, setPublishStatus] = useState('');
+  const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
+  
+  useEffect(() => {
+    if (!workout.workoutId) return;
+    const fetchStatus = async () => {
+      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'workout');
+      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === workout.workoutId);
+      setSyncRecord(record || null);
+    };
+    fetchStatus();
+    const unsub = syncManager.subscribe(fetchStatus); return () => { unsub(); };
+  }, [workout.workoutId, identity.humanUserId]);
+  
+  const publishStatus = useMemo(() => {
+    if (!syncRecord) return "Ready";
+    switch (syncRecord.status) {
+      case 'QUEUED': return "Queued—will send when connected";
+      case 'SENDING': return "Sending";
+      case 'SYNCED': return "Available in your apps";
+      case 'CONFLICT': return "Conflict";
+      case 'FAILED': return "Retry required";
+      default: return "";
+    }
+  }, [syncRecord]);
+
 
   const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);
 
@@ -76,12 +102,10 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
   const handlePublish = async () => {
     try {
-      setPublishStatus("Publishing...");
       await publicationRepository.publish(identity.humanUserId, 'workout', workout.workoutId, workout, [workout.discipline]);
-      setPublishStatus("Queued—will send when connected");
-      setTimeout(() => { setIsPublishModalOpen(false); setPublishStatus(""); }, 2000);
+      setIsPublishModalOpen(false);
     } catch (e: any) {
-      setPublishStatus("Error: " + e.message);
+      console.warn("Failed to publish", e.message);
     }
   };
   const onDragEnd = (result: DropResult) => {
@@ -380,9 +404,29 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
               <Redo2 className="w-5 h-5" />
             </button>
-            <button className="bg-hv-surface-2 text-hv-text-muted px-4 py-2 rounded-md cursor-not-allowed font-medium" disabled>
-              Publish
-            </button>
+            <button 
+    onClick={() => setIsPublishModalOpen(true)}
+    disabled={validationErrors.length > 0}
+    className={`px-4 py-2 rounded-md font-medium ${validationErrors.length > 0 ? 'bg-hv-surface-2 text-hv-text-muted cursor-not-allowed' : 'bg-hv-primary text-hv-background hover:bg-hv-primary-hover'}`}
+>
+    Publish
+</button>
+{isPublishModalOpen && (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-hv-surface-1 p-6 rounded-lg w-[400px]">
+            <h2 className="text-xl font-bold mb-4 text-hv-text">Send workout to my apps</h2>
+            <div className="space-y-3 mb-6 text-hv-text-muted">
+                <p><span className="font-semibold text-hv-text">Discipline:</span> {workout.discipline}</p>
+                <p><span className="font-semibold text-hv-text">Blocks:</span> {workout.blocks.length}</p>
+            </div>
+            {publishStatus && publishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{publishStatus}</p>}
+            <div className="flex justify-end gap-3">
+                <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
+                <button onClick={handlePublish} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
+            </div>
+        </div>
+    </div>
+)}
           </div>
         </div>
 

@@ -201,7 +201,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                   "font-medium",
                   syncState === "SYNCED" ? "text-hv-primary" : 
                   syncState === "CONFLICT" ? "text-hv-error" : 
-                  syncState === "PENDING" ? "text-hv-warning" : "text-hv-text-muted"
+                  syncState === "QUEUED" ? "text-hv-warning" : "text-hv-text-muted"
                 )}>
                   {syncState}
                 </span>

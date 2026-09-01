@@ -1,3 +1,5 @@
+import { PublishedEnvelope } from "../../domain/publication";
+import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -36,7 +38,34 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"builder" | "preview">("builder");
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  
+  const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
   const [publishStatus, setPublishStatus] = useState<string>("");
+
+  useEffect(() => {
+    if (!protocol.protocolId) return;
+    const fetchStatus = async () => {
+      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'protocol');
+      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === protocol.protocolId);
+      setSyncRecord(record || null);
+    };
+    fetchStatus();
+    const unsub = syncManager.subscribe(fetchStatus); return () => { unsub(); };
+  }, [protocol.protocolId, identity.humanUserId]);
+  
+  const displayPublishStatus = useMemo(() => {
+    if (publishStatus) return publishStatus;
+    if (!syncRecord) return "Ready";
+    switch (syncRecord.status) {
+      case 'QUEUED': return "Queued—will send when connected";
+      case 'SENDING': return "Sending";
+      case 'SYNCED': return "Available in your apps";
+      case 'CONFLICT': return "Conflict";
+      case 'FAILED': return "Retry required";
+      default: return "";
+    }
+  }, [syncRecord, publishStatus]);
+
 
   const validationErrors = useMemo(() => validateProtocol(protocol), [protocol]);
 
@@ -75,29 +104,27 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
   const handlePublish = async () => {
     try {
       setPublishStatus("Publishing...");
-      
-      const compiledTimeline = [];
       let time = 0;
+      const compiledTimeline: any[] = [];
       for (const seg of protocol.segments) {
-        for (let i=0; i<seg.repeatCount; i++) {
+        for (let i = 0; i < seg.repeatCount; i++) {
            compiledTimeline.push({
-             segmentId: seg.segmentId,
-             iteration: i,
-             phase: seg.phase,
+             startTimeOffset: time,
              durationSeconds: seg.durationSeconds,
-             startTime: time
+             phase: seg.phase,
+             exerciseSlotCount: seg.exerciseSlotCount
            });
            time += seg.durationSeconds;
         }
       }
-
       await publicationRepository.publish(identity.humanUserId, 'protocol', protocol.protocolId, protocol, protocol.suitability, compiledTimeline);
-      setPublishStatus("Queued—will send when connected");
-      setTimeout(() => { setIsPublishModalOpen(false); setPublishStatus(""); }, 2000);
+      setIsPublishModalOpen(false);
+      setPublishStatus("");
     } catch (e: any) {
       setPublishStatus("Error: " + e.message);
     }
   };
+
   const addSegment = (phase: ProtocolSegment["phase"]) => {
     setProtocol({
       ...protocol,
@@ -174,7 +201,7 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
               <p><span className="font-semibold text-hv-text">Total intervals:</span> {protocol.segments.reduce((acc, s) => acc + s.repeatCount, 0)}</p>
               <p><span className="font-semibold text-hv-text">Compatible Destinations:</span> {protocol.suitability.join(', ') || 'None'}</p>
             </div>
-            {publishStatus && <p className="mb-4 text-hv-primary">{publishStatus}</p>}
+                        {displayPublishStatus && displayPublishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{displayPublishStatus}</p>}
             <div className="flex justify-end gap-3">
               <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
               <button onClick={handlePublish} disabled={!!publishStatus} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>

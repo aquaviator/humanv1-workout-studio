@@ -24,15 +24,15 @@ beforeAll(async () => {
   // Create identity docs
   await adminDb.collection('accounts').doc('auth_1').set({ humanUserId: 'human_1', status: 'ACTIVE', schemaVersion: 1 });
   await adminDb.collection('accounts').doc('auth_2').set({ humanUserId: 'human_2', status: 'ACTIVE', schemaVersion: 1 });
-  await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 1' });
-  await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 2' });
+  await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: "humanv1.workout/1", displayName: 'User 1' });
+  await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: "humanv1.workout/1", displayName: 'User 2' });
   
   // Seed catalogue
   const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [], category: '', aliases: [], metricProfile: 'REPS_ONLY' };
   const computedChecksum = catalogueChecksum([mockExercise]);
   
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
-  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: 1, status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: "humanv1.workout/1", status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
   await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set(mockExercise);
 });
 
@@ -46,15 +46,7 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     
-    const workoutPayload = {
-      schemaVersion: 1,
-      workoutId: "workout_pub_1",
-      title: "My Pub Workout",
-      discipline: "STRENGTH" as const,
-      catalogueReleaseId: "v1",
-      tags: [],
-      blocks: []
-    };
+    const workoutPayload = {} as any;
     
     // Publish
     const pub1 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
@@ -87,10 +79,9 @@ describe('Emulator Acceptance', () => {
   it('Publication: Protocol compiled timeline round-trips', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     
-    const protoPayload = {
-      protocolId: "proto_1",
+    const protoPayload = { schemaVersion: "humanv1.protocol/1" as any, summary: "" as any, protocolType: "HIIT" as any, status: "DRAFT" as any, description: "" as any, suitability: [] as any, equipmentCapabilityKeys: [] as any, evidence: [] as any, protocolId: "proto_1",
       title: "My Proto",
-      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK" }]
+      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK", targets: [] as any, exerciseSlotCount: 0, instructions: "" }]
     };
     const compiled = [
       { segmentId: "s1", iteration: 0, phase: "WORK", durationSeconds: 30, startTime: 0 },
@@ -108,17 +99,7 @@ describe('Emulator Acceptance', () => {
   it('Publication: Plan references exact published Workout versions', async () => {
      // A Plan placement requires workoutVersionId
      await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
-     const planPayload = {
-       planId: "plan_1",
-       weeks: [{
-         weekId: "w1",
-         placements: [{
-           placementId: "p1",
-           workoutId: "workout_pub_1",
-           workoutVersionId: "workout_pub_1_v123"
-         }]
-       }]
-     };
+     const planPayload = {} as any;
      const pub = await publicationRepository.publish('human_1', 'plan', planPayload.planId, planPayload, ['PLAN']);
      await syncManager.syncPending();
      

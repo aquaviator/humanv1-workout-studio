@@ -1,5 +1,7 @@
+import { PublishedEnvelope } from "../../domain/publication";
+import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams, Link } from "react-router";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { format, addDays, startOfWeek } from "date-fns";
 import { draftRepository } from "../../repositories/DraftRepository";
@@ -89,7 +91,35 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  
+  const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
+  const [draftDependencies, setDraftDependencies] = useState<any[]>([]);
   const [publishStatus, setPublishStatus] = useState<string>("");
+
+  useEffect(() => {
+    if (!plan.planId) return;
+    const fetchStatus = async () => {
+      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'plan');
+      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === plan.planId);
+      setSyncRecord(record || null);
+    };
+    fetchStatus();
+    const unsub = syncManager.subscribe(fetchStatus); return () => { unsub(); };
+  }, [plan.planId, identity.humanUserId]);
+  
+  const displayPublishStatus = useMemo(() => {
+    if (publishStatus) return publishStatus;
+    if (!syncRecord) return "Ready";
+    switch (syncRecord.status) {
+      case 'QUEUED': return "Queued—will send when connected";
+      case 'SENDING': return "Sending";
+      case 'SYNCED': return "Available in your apps";
+      case 'CONFLICT': return "Conflict";
+      case 'FAILED': return "Retry required";
+      default: return "";
+    }
+  }, [syncRecord, publishStatus]);
+
 
   if (isLoading || !workoutsLoaded) {
     return <div className="p-8 text-center text-hv-text-muted">Loading...</div>;
@@ -99,16 +129,49 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   const handlePublish = async () => {
     try {
-      // "Before publication: every placement must reference a valid published Workout version"
-      // We assume for now they are already published or we simulate the check
       setPublishStatus("Publishing...");
-      await publicationRepository.publish(identity.humanUserId, 'plan', plan.planId, plan, ['PLAN']);
-      setPublishStatus("Queued—will send when connected");
-      setTimeout(() => { setIsPublishModalOpen(false); setPublishStatus(""); }, 2000);
+      
+      const newPlan = JSON.parse(JSON.stringify(plan));
+      
+      for (const week of newPlan.weeks) {
+         for (const placement of week.placements) {
+             const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
+             if (!workout) throw new Error(`Missing workout reference`);
+             const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
+             
+             let pub = pubs[0];
+             if (!pub || pub.publicationState === 'TOMBSTONED') {
+                 pub = await publicationRepository.publish(identity.humanUserId, 'workout', workout.workoutId, workout, [workout.discipline]);
+             }
+             placement.workoutVersionId = pub.versionId;
+         }
+      }
+      
+      await publicationRepository.publish(identity.humanUserId, 'plan', newPlan.planId, newPlan, ['PLAN']);
+      setIsPublishModalOpen(false);
+      setPublishStatus("");
     } catch (e: any) {
       setPublishStatus("Error: " + e.message);
     }
   };
+
+  const handleOpenPublish = async () => {
+      const deps: any[] = [];
+      for (const week of plan.weeks) {
+         for (const placement of week.placements) {
+             const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
+             if (workout) {
+                 const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
+                 if (pubs.length === 0 || pubs[0].publicationState === 'TOMBSTONED') {
+                     if (!deps.find(d => d.workoutId === workout.workoutId)) deps.push(workout);
+                 }
+             }
+         }
+      }
+      setDraftDependencies(deps);
+      setIsPublishModalOpen(true);
+  };
+
   const addWeek = () => {
     const newWeekIndex = plan.weeks.length;
     const newWeek = {
@@ -229,7 +292,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
           </button>
-          <button onClick={() => setIsPublishModalOpen(true)} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2">
+          <button onClick={handleOpenPublish} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2">
             <Send className="w-4 h-4" /> Send plan to my apps
           </button>
       {isPublishModalOpen && (
@@ -237,13 +300,21 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           <div className="bg-hv-surface-1 p-6 rounded-xl max-w-md w-full shadow-2xl">
             <h2 className="text-xl font-bold mb-4 text-hv-text">Send plan to my apps</h2>
             <div className="space-y-3 mb-6 text-hv-text-muted">
-              <p><span className="font-semibold text-hv-text">Weeks:</span> {plan.weeks.length}</p>
+                            <p><span className="font-semibold text-hv-text">Weeks:</span> {plan.weeks.length}</p>
               <p><span className="font-semibold text-hv-text">Placements:</span> {plan.weeks.reduce((acc, w) => acc + w.placements.length, 0)}</p>
+              {draftDependencies.length > 0 && (
+                  <div className="mt-4">
+                      <p className="font-semibold text-hv-text">Workouts that will be published automatically:</p>
+                      <ul className="list-disc pl-5">
+                          {draftDependencies.map(d => <li key={d.workoutId}>{d.title}</li>)}
+                      </ul>
+                  </div>
+              )}
             </div>
-            {publishStatus && <p className="mb-4 text-hv-primary">{publishStatus}</p>}
+                        {displayPublishStatus && displayPublishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{displayPublishStatus}</p>}
             <div className="flex justify-end gap-3">
               <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
-              <button onClick={handlePublish} disabled={!!publishStatus} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
+              <button onClick={handleOpenPublish} disabled={!!publishStatus} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
             </div>
           </div>
         </div>

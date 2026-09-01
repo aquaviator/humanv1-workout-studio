@@ -60,6 +60,30 @@ service cloud.firestore {
       match /protocolDrafts/{itemId} {
         allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
       }
+      function validPublished(data, itemId, contentType) {
+        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'publicationState', 'payload', 'createdAt', 'updatedAt', 'publishedAt', 'contentChecksum', 'versionId', 'contentType'])
+          && data.schemaVersion == 1 && data.humanUserId == humanUserId
+          && data.versionId == itemId && data.revision is int && data.revision >= 1
+          && data.publicationState in ['PUBLISHED', 'TOMBSTONED']
+          && data.payload is map && data.contentChecksum is string && data.contentChecksum != ''
+          && data.createdAt is string && data.updatedAt is string && data.publishedAt is string
+          && data.contentType == contentType;
+      }
+      match /publishedWorkouts/{itemId} {
+        allow read: if owns(humanUserId);
+        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'workout');
+        allow update, delete: if false;
+      }
+      match /publishedPlans/{itemId} {
+        allow read: if owns(humanUserId);
+        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'plan');
+        allow update, delete: if false;
+      }
+      match /publishedProtocols/{itemId} {
+        allow read: if owns(humanUserId);
+        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'protocol');
+        allow update, delete: if false;
+      }
       match /{immutableCollection}/{itemId} {
         allow read: if owns(humanUserId) && immutableCollection in ['workouts', 'workoutVersions', 'plans', 'planVersions', 'protocols', 'protocolVersions', 'studioCommands', 'studioProcessedCommands'];
         allow write: if false;
