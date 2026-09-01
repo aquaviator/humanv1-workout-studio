@@ -81,7 +81,7 @@ describe('Emulator Acceptance', () => {
     
     const protoPayload = { schemaVersion: "humanv1.protocol/1" as any, summary: "" as any, protocolType: "HIIT" as any, status: "DRAFT" as any, description: "" as any, suitability: [] as any, equipmentCapabilityKeys: [] as any, evidence: [] as any, protocolId: "proto_1",
       title: "My Proto",
-      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK", targets: [] as any, exerciseSlotCount: 0, instructions: "" }]
+      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK" as any, targets: [] as any, exerciseSlotCount: 0, instructions: "" }]
     };
     const compiled = [
       { segmentId: "s1", iteration: 0, phase: "WORK", durationSeconds: 30, startTime: 0 },
@@ -110,7 +110,7 @@ describe('Emulator Acceptance', () => {
   
   it('Publication: Cross-owner writes are denied', async () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
-    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', { title: 'hacked' }, []);
+    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', { title: 'hacked' } as any, []);
     await syncManager.syncPending();
     const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId));
     expect(remote.exists()).toBe(false);
