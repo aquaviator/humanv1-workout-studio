@@ -4,6 +4,9 @@ import { cn } from "./lib/utils";
 import React, { useState, useEffect, Suspense } from "react";
 import { authRepository } from "./repositories/AuthManager";
 import { HumanIdentity } from "./domain/identity";
+import { Entitlement } from "./domain/entitlement";
+import { entitlementRepository } from "./repositories/FirebaseEntitlementRepository";
+import EntitlementGate from "./ui/components/EntitlementGate";
 import { env } from "./config/env";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
@@ -61,6 +64,7 @@ function Navigation() {
 export default function App() {
   const [identity, setIdentity] = useState<HumanIdentity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
 
   useEffect(() => {
     const unsubscribe = authRepository.onAuthStateChanged((user) => {
@@ -69,6 +73,12 @@ export default function App() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    setEntitlement(null);
+    if (!identity) return;
+    return entitlementRepository.onEntitlementChanged(identity.humanUserId, setEntitlement);
+  }, [identity]);
 
   const handleSignIn = async () => {
     try {
@@ -108,16 +118,16 @@ export default function App() {
         <main className="flex-1 overflow-y-auto relative">
           <Suspense fallback={<div className="p-8 text-hv-text-muted">Loading...</div>}>
             <Routes>
-              <Route path="/" element={<Dashboard identity={identity} />} />
-              <Route path="/workouts" element={<WorkoutsList identity={identity} />} />
-              <Route path="/workouts/new" element={<WorkoutBuilder identity={identity} />} />
-              <Route path="/workouts/:workoutId" element={<WorkoutBuilder identity={identity} />} />
-              <Route path="/plans" element={<PlansList identity={identity} />} />
-              <Route path="/plans/new" element={<PlanBuilder identity={identity} />} />
-              <Route path="/library/exercises" element={<ExerciseLibrary />} />
-              <Route path="/library/protocols" element={<ProtocolLibrary identity={identity} />} />
-              <Route path="/protocols/new" element={<ProtocolBuilder identity={identity} />} />
-              <Route path="/conflicts" element={<ConflictCentre identity={identity} />} />
+              <Route path="/" element={<EntitlementGate entitlement={entitlement}><Dashboard identity={identity} /></EntitlementGate>} />
+              <Route path="/workouts" element={<EntitlementGate entitlement={entitlement}><WorkoutsList identity={identity} /></EntitlementGate>} />
+              <Route path="/workouts/new" element={<EntitlementGate entitlement={entitlement}><WorkoutBuilder identity={identity} /></EntitlementGate>} />
+              <Route path="/workouts/:workoutId" element={<EntitlementGate entitlement={entitlement}><WorkoutBuilder identity={identity} /></EntitlementGate>} />
+              <Route path="/plans" element={<EntitlementGate entitlement={entitlement}><PlansList identity={identity} /></EntitlementGate>} />
+              <Route path="/plans/new" element={<EntitlementGate entitlement={entitlement}><PlanBuilder identity={identity} /></EntitlementGate>} />
+              <Route path="/library/exercises" element={<EntitlementGate entitlement={entitlement}><ExerciseLibrary /></EntitlementGate>} />
+              <Route path="/library/protocols" element={<EntitlementGate entitlement={entitlement}><ProtocolLibrary identity={identity} /></EntitlementGate>} />
+              <Route path="/protocols/new" element={<EntitlementGate entitlement={entitlement}><ProtocolBuilder identity={identity} /></EntitlementGate>} />
+              <Route path="/conflicts" element={<EntitlementGate entitlement={entitlement}><ConflictCentre identity={identity} /></EntitlementGate>} />
               <Route path="/account" element={<AccountSettings identity={identity} />} />
             </Routes>
           </Suspense>
