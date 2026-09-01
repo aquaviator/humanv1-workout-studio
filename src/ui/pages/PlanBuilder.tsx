@@ -93,14 +93,14 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
-  const [draftDependencies, setDraftDependencies] = useState<any[]>([]);
+  const [draftDependencies, setDraftDependencies] = useState<Workout[]>([]);
   const [publishStatus, setPublishStatus] = useState<string>("");
 
   useEffect(() => {
     if (!plan.planId) return;
     const fetchStatus = async () => {
       const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'plan');
-      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === plan.planId);
+      const record = records.find(r => (r.envelope as PublishedEnvelope<Plan>).sourceDraftId === plan.planId);
       setSyncRecord(record || null);
     };
     fetchStatus();
@@ -139,31 +139,32 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
              if (!workout) throw new Error(`Missing workout reference`);
              const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
              
-             let pub = pubs[0];
-             if (!pub || pub.publicationState === 'TOMBSTONED') {
-                 pub = await publicationRepository.publish(identity.humanUserId, 'workout', workout.workoutId, workout, [workout.discipline]);
+             const checksum = await publicationRepository.generateChecksum(workout);
+             let pub = pubs.find(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED');
+             if (!pub) {
+                 pub = await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
              }
              placement.workoutVersionId = pub.versionId;
          }
       }
       
-      await publicationRepository.publish(identity.humanUserId, 'plan', newPlan.planId, newPlan, ['PLAN']);
+      await publicationRepository.publishAuthenticated('plan', newPlan.planId, newPlan, ['PLAN']);
       setIsPublishModalOpen(false);
       setPublishStatus("");
-    } catch (e: any) {
-      setPublishStatus("Error: " + e.message);
+    } catch (error: unknown) {
+      setPublishStatus(`Error: ${error instanceof Error ? error.message : 'Publication failed'}`);
     }
   };
 
   const handleOpenPublish = async () => {
-      const deps: any[] = [];
+      const deps: Workout[] = [];
       for (const week of plan.weeks) {
          for (const placement of week.placements) {
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (workout) {
                  const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
                  if (pubs.length === 0 || pubs[0].publicationState === 'TOMBSTONED') {
-                     if (!deps.find(d => d.workoutId === workout.workoutId)) deps.push(workout);
+                 if (!deps.find(dependency => dependency.workoutId === workout.workoutId)) deps.push(workout);
                  }
              }
          }

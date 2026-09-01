@@ -45,7 +45,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     if (!workout.workoutId) return;
     const fetchStatus = async () => {
       const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'workout');
-      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === workout.workoutId);
+      const record = records.find(r => (r.envelope as PublishedEnvelope<Workout>).sourceDraftId === workout.workoutId);
       setSyncRecord(record || null);
     };
     fetchStatus();
@@ -102,10 +102,10 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
   const handlePublish = async () => {
     try {
-      await publicationRepository.publish(identity.humanUserId, 'workout', workout.workoutId, workout, [workout.discipline]);
+      await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
       setIsPublishModalOpen(false);
-    } catch (e: any) {
-      console.warn("Failed to publish", e.message);
+    } catch (error: unknown) {
+      console.warn("Failed to publish", error instanceof Error ? error.message : 'Publication failed');
     }
   };
   const onDragEnd = (result: DropResult) => {
@@ -322,7 +322,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
               if (ex.blockId !== blockId) return ex;
               return {
                 ...ex,
-                efforts: ex.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as any } : e)
+                efforts: ex.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as Effort['effortType'] } : e)
               };
             })
           };
@@ -330,7 +330,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
         if (!parentBlockId && b.blockId === blockId && b.type === "EXERCISE") {
           return {
             ...b,
-            efforts: b.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as any } : e)
+            efforts: b.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as Effort['effortType'] } : e)
           };
         }
         return b;

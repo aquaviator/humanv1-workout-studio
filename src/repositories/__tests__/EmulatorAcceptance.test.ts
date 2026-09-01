@@ -13,6 +13,15 @@ import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 import { catalogueChecksum } from '../FirebaseCatalogueRepository';
+import { Workout } from '../../domain/types';
+
+const validWorkout = (workoutId: string, title: string): Workout => ({
+  schemaVersion: 'humanv1.workout/1', workoutId, title, discipline: 'STRENGTH', catalogueReleaseId: 'v1', tags: [],
+  blocks: [{ blockId: `${workoutId}-block`, type: 'EXERCISE', exerciseId: 'ex1', exerciseNameSnapshot: 'Push Up',
+    efforts: [{ effortId: `${workoutId}-effort`, effortType: 'WORKING', prescriptions: [
+      { prescriptionId: `${workoutId}-rx`, metricKey: 'repetitions', targetValue: 10, canonicalUnit: 'repetitions' }
+    ] }] }]
+});
 
 beforeAll(async () => {
   // Create synthetic users
@@ -24,8 +33,8 @@ beforeAll(async () => {
   // Create identity docs
   await adminDb.collection('accounts').doc('auth_1').set({ humanUserId: 'human_1', status: 'ACTIVE', schemaVersion: 1 });
   await adminDb.collection('accounts').doc('auth_2').set({ humanUserId: 'human_2', status: 'ACTIVE', schemaVersion: 1 });
-  await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: "humanv1.workout/1", displayName: 'User 1' });
-  await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: "humanv1.workout/1", displayName: 'User 2' });
+  await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 1' });
+  await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 2' });
   
   // Seed catalogue
   const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [], category: '', aliases: [], metricProfile: 'REPS_ONLY' };
@@ -46,15 +55,7 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     
-    const workoutPayload: any = {
-      schemaVersion: "1",
-      workoutId: "workout_1",
-      title: "My Workout",
-      discipline: "STRENGTH" as "STRENGTH",
-      catalogueReleaseId: "v1",
-      tags: [],
-      blocks: []
-    };
+    const workoutPayload = validWorkout('workout_1', 'My Pub Workout');
     
     // Publish
     const pub1 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
@@ -103,7 +104,7 @@ describe('Emulator Acceptance', () => {
         durationSeconds: 30,
         repeatCount: 2,
         targets: [],
-        exerciseSlotCount: 0,
+        exerciseSlotCount: 1,
         instructions: ""
       }]
     };
@@ -123,6 +124,8 @@ describe('Emulator Acceptance', () => {
   it('Publication: Plan references exact published Workout versions', async () => {
      // A Plan placement requires workoutVersionId
      await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+     const dependency = await publicationRepository.publish('human_1', 'workout', 'workout_plan_dependency', validWorkout('workout_plan_dependency', 'Plan Workout'));
+     await syncManager.syncPending();
      const planPayload: import("../../domain/types").Plan = {
       schemaVersion: "1",
       planId: "plan_1",
@@ -135,8 +138,8 @@ describe('Emulator Acceptance', () => {
         placements: [{
           placementId: "p1",
           dayOfWeek: 1,
-          workoutId: "workout_1",
-          workoutVersionId: "workout_pub_1_v123",
+          workoutId: "workout_plan_dependency",
+          workoutVersionId: dependency.versionId,
           preferredMinuteOfDay: null,
           reminderEnabled: false,
           notes: ""
@@ -148,20 +151,12 @@ describe('Emulator Acceptance', () => {
      
      const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', pub.versionId));
      expect(remote.exists()).toBe(true);
-     expect(remote.data()?.payload.weeks[0].placements[0].workoutVersionId).toBe("workout_pub_1_v123");
+     expect(remote.data()?.payload.weeks[0].placements[0].workoutVersionId).toBe(dependency.versionId);
   });
   
   it('Publication: Cross-owner writes are denied', async () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
-    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', {
-      schemaVersion: "1",
-      workoutId: "workout_hack",
-      title: "hacked",
-      discipline: "STRENGTH" as "STRENGTH",
-      catalogueReleaseId: "v1",
-      tags: [],
-      blocks: []
-    }, []);
+    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', validWorkout('workout_hack', 'hacked'), []);
     await syncManager.syncPending();
     const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId));
     expect(remote.exists()).toBe(false);

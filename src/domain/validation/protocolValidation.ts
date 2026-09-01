@@ -29,6 +29,17 @@ export function validateProtocol(protocol: Protocol): ProtocolValidationError[] 
     if (segment.phase === "WORK" && segment.exerciseSlotCount < 1) {
       errors.push({ segmentId: segment.segmentId, message: "Work segments must have at least 1 exercise slot." });
     }
+    if (segment.phase !== "WORK" && segment.exerciseSlotCount !== 0) {
+      errors.push({ segmentId: segment.segmentId, message: "Only work segments may define exercise slots." });
+    }
+    segment.targets.forEach(target => {
+      if (!target.metricKey || !target.canonicalUnit) errors.push({ segmentId: segment.segmentId, message: "Targets require a metric and canonical unit." });
+      if (target.minimumValue !== undefined && target.maximumValue !== undefined && target.minimumValue > target.maximumValue) {
+        errors.push({ segmentId: segment.segmentId, message: "Target minimum cannot exceed maximum." });
+      }
+      if (target.targetValue !== undefined && target.minimumValue !== undefined && target.targetValue < target.minimumValue) errors.push({ segmentId: segment.segmentId, message: "Target value cannot be below minimum." });
+      if (target.targetValue !== undefined && target.maximumValue !== undefined && target.targetValue > target.maximumValue) errors.push({ segmentId: segment.segmentId, message: "Target value cannot exceed maximum." });
+    });
   });
 
   return errors;

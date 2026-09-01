@@ -133,7 +133,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
         <select 
           className="bg-hv-surface-1 border border-hv-border rounded-md px-4 py-2 focus:outline-none"
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
+          onChange={(e) => setSortBy(e.target.value as "updatedAt" | "title" | "duration")}
         >
           <option value="updatedAt">Last Updated</option>
           <option value="title">Title (A-Z)</option>

@@ -1,17 +1,19 @@
 import { get, set, keys, setMany } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
 import { PublishedEnvelope } from '../domain/publication';
+import { PublishableContent } from '../domain/publication';
 import { db } from '../config/firebase';
 import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
 
 export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
+export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
 
 export interface SyncRecord {
   syncType?: 'draft' | 'publication';
-  envelope: DraftEnvelope<any> | PublishedEnvelope<any>;
+  envelope: DraftEnvelope<PublishableContent> | PublishedEnvelope<PublishableContent>;
   status: SyncStatus;
   type: 'workout' | 'plan' | 'protocol';
-  lastErrorCode?: string;
+  lastErrorCode?: SyncFailureCode;
   acknowledgedRevision?: number;
 }
 
@@ -40,9 +42,9 @@ export class SyncManager {
     this.subscribers.forEach(s => s());
   }
 
-  async queueUpload(envelope: DraftEnvelope<any> | PublishedEnvelope<any>, type: 'workout' | 'plan' | 'protocol', syncType: 'draft' | 'publication' = 'draft'): Promise<void> {
+  async queueUpload(envelope: DraftEnvelope<PublishableContent> | PublishedEnvelope<PublishableContent>, type: 'workout' | 'plan' | 'protocol', syncType: 'draft' | 'publication' = 'draft'): Promise<void> {
     const key = syncType === 'publication' 
-      ? `sync_pub_${envelope.humanUserId}_${type}_${(envelope as PublishedEnvelope<any>).versionId}` 
+      ? `sync_pub_${envelope.humanUserId}_${type}_${(envelope as PublishedEnvelope<PublishableContent>).versionId}`
       : `sync_${envelope.humanUserId}_${type}_${envelope.globalId}`;
       
     const record: SyncRecord = {
@@ -78,12 +80,12 @@ export class SyncManager {
       const snap = await getDocs(q);
       
       const localPrefix = `drafts_${humanUserId}_${type}_`;
-      const setOps: [string, any][] = [];
+      const setOps: [string, SyncRecord | DraftEnvelope<PublishableContent>][] = [];
       
       for (const doc of snap.docs) {
-        const remoteData = doc.data() as DraftEnvelope<any>;
+        const remoteData = doc.data() as DraftEnvelope<PublishableContent>;
         const localKey = `${localPrefix}${remoteData.globalId}`;
-        const localData = await get<DraftEnvelope<any>>(localKey);
+        const localData = await get<DraftEnvelope<PublishableContent>>(localKey);
         
         const syncKey = `sync_${humanUserId}_${type}_${remoteData.globalId}`;
         const syncRecord = await get<SyncRecord>(syncKey);
@@ -115,7 +117,7 @@ export class SyncManager {
     const { envelope, type } = record;
     const isPub = record.syncType === 'publication';
     const collectionName = isPub ? `published${type.charAt(0).toUpperCase() + type.slice(1)}s` : `${type}Drafts`;
-    const docId = isPub ? (envelope as PublishedEnvelope<any>).versionId : envelope.globalId;
+    const docId = isPub ? (envelope as PublishedEnvelope<PublishableContent>).versionId : envelope.globalId;
     const docRef = doc(db, 'users', envelope.humanUserId, collectionName, docId);
 
     record.status = 'SENDING';
@@ -126,7 +128,7 @@ export class SyncManager {
       await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(docRef);
         if (snapshot.exists()) {
-          const remoteData = snapshot.data() as DraftEnvelope<any> | PublishedEnvelope<any>;
+          const remoteData = snapshot.data() as DraftEnvelope<PublishableContent> | PublishedEnvelope<PublishableContent>;
           
           if (remoteData.humanUserId !== envelope.humanUserId) {
             throw new Error("OWNERSHIP_CONFLICT");
@@ -151,27 +153,31 @@ export class SyncManager {
       this.notify();
     } catch (e: unknown) {
       let isNetworkError = false;
-      let errorCode = 'UPLOAD_FAILED';
+      let errorCode: SyncFailureCode = 'UPLOAD_FAILED';
       let isTerminal = false;
 
       if (e instanceof Error) {
-        if (e.message.includes('Connection failed') || e.message.includes('offline')) {
+        const firebaseCode = 'code' in e && typeof e.code === 'string' ? e.code : '';
+        if (e.message.includes('Connection failed') || e.message.toLowerCase().includes('offline') || firebaseCode === 'unavailable') {
           isNetworkError = true;
           errorCode = 'NETWORK_OFFLINE';
-          console.warn("Sync upload failed (expected offline/retryable)", e.message);
+          console.warn("Sync upload failed (expected offline/retryable): NETWORK_OFFLINE");
+        } else if (firebaseCode === 'deadline-exceeded' || firebaseCode === 'resource-exhausted' || firebaseCode === 'aborted') {
+          errorCode = 'NETWORK_RETRYABLE';
+          console.warn("Sync upload failed (expected retryable): NETWORK_RETRYABLE");
         } else if (e.message === 'OWNERSHIP_CONFLICT' || e.message === 'REVISION_CONFLICT' || e.message === 'REVISION_COLLISION') {
           errorCode = e.message;
           isTerminal = true;
-          console.error("Sync upload terminal conflict", e);
-        } else if (e.message.includes('Missing or insufficient permissions')) {
+          console.error(`Sync upload terminal conflict: ${errorCode}`);
+        } else if (e.message.includes('Missing or insufficient permissions') || firebaseCode === 'permission-denied') {
           errorCode = 'PERMISSION_DENIED';
           isTerminal = true;
-          console.error("Sync upload terminal failure", e);
+          console.error("Sync upload terminal failure: PERMISSION_DENIED");
         } else {
-          console.error("Sync upload terminal failure", e);
+          console.error("Sync upload terminal failure: UPLOAD_FAILED");
         }
       } else {
-        console.error("Sync upload terminal failure (unknown type)", e);
+        console.error("Sync upload terminal failure: UPLOAD_FAILED");
       }
 
       if (isTerminal) {

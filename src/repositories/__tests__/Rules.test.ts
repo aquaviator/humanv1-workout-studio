@@ -9,6 +9,11 @@ const draft = (humanUserId: string, globalId: string, revision: number) => ({
   schemaVersion: 1, globalId, humanUserId, revision, status: 'DRAFT', payload: {},
   createdAt: '2026-01-01T00:00:00.000Z', updatedAt: `2026-01-01T00:00:0${revision}.000Z`, deletedAt: null, originClientId: 'test',
 });
+const published = (humanUserId: string, globalId: string, contentType: 'workout' | 'plan' | 'protocol') => ({
+  schemaVersion: `humanv1.${contentType}/1`, globalId, humanUserId, revision: 1, publicationState: 'PUBLISHED', tombstoneState: 'ACTIVE',
+  sourceDraftId: globalId, payload: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  publishedAt: '2026-01-01T00:00:00.000Z', contentChecksum: 'a'.repeat(64), versionId: `${globalId}_v1`, contentType, compatibleTags: [],
+});
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
@@ -45,6 +50,38 @@ beforeEach(async () => {
 });
 
 describe('Firestore Security Rules', () => {
+  it.each([
+    ['publishedWorkouts', 'workout'], ['publishedPlans', 'plan'], ['publishedProtocols', 'protocol'],
+  ] as const)('allows owner create/read and makes %s immutable', async (collectionName, contentType) => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = published('human_1', `${contentType}-1`, contentType);
+    const ref = doc(alice, 'users', 'human_1', collectionName, value.versionId);
+    await assertSucceeds(setDoc(ref, value));
+    await assertSucceeds(getDoc(ref));
+    await assertFails(updateDoc(ref, { revision: 2 }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  it('denies cross-owner publication reads/writes and owner reassignment', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
+    const value = published('human_1', 'workout-1', 'workout');
+    const ref = doc(alice, 'users', 'human_1', 'publishedWorkouts', value.versionId);
+    await assertSucceeds(setDoc(ref, value));
+    await assertFails(getDoc(doc(bob, 'users', 'human_1', 'publishedWorkouts', value.versionId)));
+    await assertFails(setDoc(doc(bob, 'users', 'human_1', 'publishedWorkouts', 'workout-2_v1'), published('human_1', 'workout-2', 'workout')));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'publishedWorkouts', 'workout-3_v1'), published('human_2', 'workout-3', 'workout')));
+  });
+
+  it('rejects malformed publication contract fields', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const valid = published('human_1', 'workout-1', 'workout');
+    const base = doc(alice, 'users', 'human_1', 'publishedWorkouts');
+    await assertFails(setDoc(doc(base, 'bad-schema'), { ...valid, versionId: 'bad-schema', schemaVersion: 1 }));
+    await assertFails(setDoc(doc(base, 'bad-type'), { ...valid, versionId: 'bad-type', contentType: 'plan' }));
+    await assertFails(setDoc(doc(base, 'bad-revision'), { ...valid, versionId: 'bad-revision', revision: 0 }));
+    await assertFails(setDoc(doc(base, 'bad-checksum'), { ...valid, versionId: 'bad-checksum', contentChecksum: 'short' }));
+  });
   
   // 1. Identity mapping is client read-only.
   it('allows reading own identity but denies writing', async () => {

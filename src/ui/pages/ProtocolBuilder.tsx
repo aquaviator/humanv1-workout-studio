@@ -1,4 +1,4 @@
-import { PublishedEnvelope } from "../../domain/publication";
+import { compileProtocolTimeline, PublishedEnvelope } from "../../domain/publication";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
@@ -46,7 +46,7 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
     if (!protocol.protocolId) return;
     const fetchStatus = async () => {
       const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'protocol');
-      const record = records.find(r => (r.envelope as PublishedEnvelope<any>).sourceDraftId === protocol.protocolId);
+      const record = records.find(r => (r.envelope as PublishedEnvelope<Protocol>).sourceDraftId === protocol.protocolId);
       setSyncRecord(record || null);
     };
     fetchStatus();
@@ -104,24 +104,12 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
   const handlePublish = async () => {
     try {
       setPublishStatus("Publishing...");
-      let time = 0;
-      const compiledTimeline: any[] = [];
-      for (const seg of protocol.segments) {
-        for (let i = 0; i < seg.repeatCount; i++) {
-           compiledTimeline.push({
-             startTimeOffset: time,
-             durationSeconds: seg.durationSeconds,
-             phase: seg.phase,
-             exerciseSlotCount: seg.exerciseSlotCount
-           });
-           time += seg.durationSeconds;
-        }
-      }
-      await publicationRepository.publish(identity.humanUserId, 'protocol', protocol.protocolId, protocol, protocol.suitability, compiledTimeline);
+      const compiledTimeline = compileProtocolTimeline(protocol);
+      await publicationRepository.publishAuthenticated('protocol', protocol.protocolId, protocol, protocol.suitability, compiledTimeline);
       setIsPublishModalOpen(false);
       setPublishStatus("");
-    } catch (e: any) {
-      setPublishStatus("Error: " + e.message);
+    } catch (error: unknown) {
+      setPublishStatus(`Error: ${error instanceof Error ? error.message : 'Publication failed'}`);
     }
   };
 

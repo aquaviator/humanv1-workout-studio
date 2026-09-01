@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from 'react-router';
 import { axe } from 'jest-axe';
 import WorkoutBuilder from '../WorkoutBuilder';
 import { HumanIdentity } from '../../../domain/identity';
+import { Workout } from '../../../domain/types';
 
 const mockIdentity: HumanIdentity = {
   humanUserId: 'test-user',
@@ -82,7 +83,7 @@ describe('WorkoutBuilder', () => {
   it('saves, reopens, and idempotently maintains the workout ID', async () => {
     const { draftRepository } = await import('../../../repositories/DraftRepository');
     const workoutId = 'test-reopen-id';
-    const mockDraft = {
+    const mockDraft: Workout = {
       workoutId,
       schemaVersion: 'humanv1.workout/1',
       title: 'Reopened Workout',
@@ -91,7 +92,7 @@ describe('WorkoutBuilder', () => {
       tags: [],
       blocks: [{ blockId: 'test-block', type: 'EXERCISE', exerciseId: 'bench-press', exerciseNameSnapshot: 'Bench Press', efforts: [{ effortId: 'eff-1', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'p1', metricKey: 'repetition_count', targetValue: 10, canonicalUnit: 'count', position: 0 }, { prescriptionId: 'p2', metricKey: 'external_load', targetValue: 50, canonicalUnit: 'kg', position: 1 }] }] }]
     };
-    await draftRepository.saveWorkoutDraft(mockIdentity.humanUserId, mockDraft as any);
+    await draftRepository.saveWorkoutDraft(mockIdentity.humanUserId, mockDraft);
     const checkDraft = await draftRepository.getWorkoutDraft(mockIdentity.humanUserId, workoutId);
     console.log("DRAFT AFTER SAVE:", JSON.stringify(checkDraft, null, 2));
 

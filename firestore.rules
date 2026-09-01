@@ -61,11 +61,13 @@ service cloud.firestore {
         allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
       }
       function validPublished(data, itemId, contentType) {
-        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'publicationState', 'payload', 'createdAt', 'updatedAt', 'publishedAt', 'contentChecksum', 'versionId', 'contentType'])
-          && data.schemaVersion == 1 && data.humanUserId == humanUserId
+        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'publicationState', 'tombstoneState', 'sourceDraftId', 'payload', 'createdAt', 'updatedAt', 'publishedAt', 'contentChecksum', 'versionId', 'contentType', 'compatibleTags'])
+          && data.schemaVersion is string && data.schemaVersion != '' && data.humanUserId == humanUserId
+          && data.globalId is string && data.globalId != '' && data.sourceDraftId == data.globalId
           && data.versionId == itemId && data.revision is int && data.revision >= 1
-          && data.publicationState in ['PUBLISHED', 'TOMBSTONED']
-          && data.payload is map && data.contentChecksum is string && data.contentChecksum != ''
+          && data.publicationState in ['PUBLISHED', 'TOMBSTONED'] && data.tombstoneState in ['ACTIVE', 'SOFT_DELETED']
+          && data.payload is map && data.contentChecksum is string && data.contentChecksum.size() == 64
+          && data.compatibleTags is list
           && data.createdAt is string && data.updatedAt is string && data.publishedAt is string
           && data.contentType == contentType;
       }
