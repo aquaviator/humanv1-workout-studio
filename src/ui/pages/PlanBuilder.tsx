@@ -1,6 +1,4 @@
-import { useParams } from "react-router";
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router";
 import { v4 as uuidv4 } from "uuid";
 import { format, addDays, startOfWeek } from "date-fns";
 import { draftRepository } from "../../repositories/DraftRepository";
@@ -10,11 +8,8 @@ import { Dumbbell, Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
 import { HumanIdentity } from "../../domain/identity";
 import { Plan } from "../../domain/types";
-import { validatePlan } from "../../domain/validation/planValidation";
-import { AlertCircle } from "lucide-react";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
-  const { planId: routePlanId } = useParams<{ planId: string }>();
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
   React.useEffect(() => { 
@@ -65,7 +60,6 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const availableWorkouts = workoutsData;
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
-  const validationErrors = React.useMemo(() => validatePlan(plan), [plan]);
 
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -96,34 +90,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading]);
 
-  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
-
   if (isLoading || !workoutsLoaded) {
     return <div className="p-8 text-center text-hv-text-muted">Loading...</div>;
   }
-
-
-
-  const addWeek = () => {
-    const newWeekIndex = plan.weeks.length;
-    const newWeek = {
-      weekId: uuidv4(),
-      weekNumber: newWeekIndex + 1,
-      label: `Week ${newWeekIndex + 1}`,
-      placements: []
-    };
-    setPlan({ ...plan, weeks: [...plan.weeks, newWeek] });
-    setActiveWeekIndex(newWeekIndex);
-  };
-
-  const removeCurrentWeek = () => {
-    if (plan.weeks.length <= 1) return;
-    const updatedWeeks = plan.weeks.filter((_, idx) => idx !== activeWeekIndex);
-    // Re-number weeks
-    const renumbered = updatedWeeks.map((w, idx) => ({ ...w, weekNumber: idx + 1, label: `Week ${idx + 1}` }));
-    setPlan({ ...plan, weeks: renumbered });
-    setActiveWeekIndex(Math.max(0, activeWeekIndex - 1));
-  };
 
   const onDragEnd = (result: DropResult) => {
     const { source, destination } = result;
@@ -144,9 +113,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       };
       
       const updatedWeeks = [...plan.weeks];
-      updatedWeeks[activeWeekIndex] = {
-        ...updatedWeeks[activeWeekIndex],
-        placements: [...updatedWeeks[activeWeekIndex].placements, newPlacement]
+      updatedWeeks[0] = {
+        ...updatedWeeks[0],
+        placements: [...updatedWeeks[0].placements, newPlacement]
       };
       
       setPlan({ ...plan, weeks: updatedWeeks });
@@ -155,7 +124,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       const destDay = parseInt(destination.droppableId.replace("day-", ""));
       
       const updatedWeeks = [...plan.weeks];
-      const sourcePlacements = [...updatedWeeks[activeWeekIndex].placements];
+      const sourcePlacements = [...updatedWeeks[0].placements];
       
       const movedItemIndex = sourcePlacements.findIndex(p => p.placementId === result.draggableId);
       if (movedItemIndex >= 0) {
@@ -163,7 +132,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         movedItem.dayOfWeek = destDay;
         sourcePlacements.push(movedItem);
         
-        updatedWeeks[activeWeekIndex] = { ...updatedWeeks[activeWeekIndex], placements: sourcePlacements };
+        updatedWeeks[0] = { ...updatedWeeks[0], placements: sourcePlacements };
         setPlan({ ...plan, weeks: updatedWeeks });
       }
     }
@@ -171,9 +140,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   const removePlacement = (placementId: string) => {
     const updatedWeeks = [...plan.weeks];
-    updatedWeeks[activeWeekIndex] = {
-      ...updatedWeeks[activeWeekIndex],
-      placements: updatedWeeks[activeWeekIndex].placements.filter(p => p.placementId !== placementId)
+    updatedWeeks[0] = {
+      ...updatedWeeks[0],
+      placements: updatedWeeks[0].placements.filter(p => p.placementId !== placementId)
     };
     setPlan({ ...plan, weeks: updatedWeeks });
   };
@@ -189,9 +158,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       notes: ""
     };
     const updatedWeeks = [...plan.weeks];
-    updatedWeeks[activeWeekIndex] = {
-      ...updatedWeeks[activeWeekIndex],
-      placements: [...updatedWeeks[activeWeekIndex].placements, newPlacement]
+    updatedWeeks[0] = {
+      ...updatedWeeks[0],
+      placements: [...updatedWeeks[0].placements, newPlacement]
     };
     setPlan({ ...plan, weeks: updatedWeeks });
   };
@@ -230,40 +199,6 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         </div>
       </div>
       
-      <div className="px-4 md:px-8 border-b border-hv-border flex items-center justify-between py-2">
-        <div className="flex gap-2">
-          {plan.weeks.map((week, idx) => (
-            <button
-              key={week.weekId}
-              onClick={() => setActiveWeekIndex(idx)}
-              className={`px-3 py-1 text-sm font-medium rounded-full transition-colors ${
-                activeWeekIndex === idx 
-                  ? 'bg-hv-primary text-white' 
-                  : 'bg-hv-surface-2 text-hv-text hover:bg-hv-border'
-              }`}
-            >
-              {week.label}
-            </button>
-          ))}
-          <button 
-            onClick={addWeek}
-            className="px-3 py-1 text-sm font-medium rounded-full border border-hv-border hover:bg-hv-surface-2 transition-colors flex items-center gap-1"
-          >
-            <Plus className="w-3 h-3" /> Add Week
-          </button>
-        </div>
-        {plan.weeks.length > 1 && (
-          <button 
-            onClick={removeCurrentWeek}
-            className="text-xs text-hv-error hover:underline flex items-center gap-1"
-          >
-            <Trash2 className="w-3 h-3" /> Remove current week
-          </button>
-        )}
-      </div>
-      
-
-      
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* Calendar Grid */}
@@ -271,7 +206,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
             <div className="flex flex-col md:flex-row gap-4 overflow-x-auto pb-4">
               {days.map((day, idx) => {
                 const dayOfWeekNumber = day.getDay() === 0 ? 7 : day.getDay();
-                const placements = plan.weeks[activeWeekIndex].placements.filter(p => p.dayOfWeek === dayOfWeekNumber);
+                const placements = plan.weeks[0].placements.filter(p => p.dayOfWeek === dayOfWeekNumber);
                 
                 return (
                   <div key={day.toISOString()} className="flex-1 min-w-[200px] flex flex-col bg-hv-surface-1 border border-hv-border rounded-lg overflow-hidden shrink-0 md:shrink">
@@ -350,26 +285,11 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                               </div>
                             </div>
                             
-                            <div className="flex gap-1 items-center">
-                              <select 
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    addWorkoutToDay(workout.workoutId, parseInt(e.target.value));
-                                    e.target.value = "";
-                                  }
-                                }}
-                                className="text-xs bg-hv-surface-2 p-1 rounded border border-hv-border"
-                                aria-label="Add workout to day"
-                              >
-                                <option value="">Add to...</option>
-                                <option value="1">Monday</option>
-                                <option value="2">Tuesday</option>
-                                <option value="3">Wednesday</option>
-                                <option value="4">Thursday</option>
-                                <option value="5">Friday</option>
-                                <option value="6">Saturday</option>
-                                <option value="7">Sunday</option>
-                              </select>
+                            {/* Mobile-friendly Add buttons when drag is hard */}
+                            <div className="flex gap-1">
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 1)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Monday">Mon</button>
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 3)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Wednesday">Wed</button>
+                              <button onClick={() => addWorkoutToDay(workout.workoutId, 5)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Friday">Fri</button>
                             </div>
                           </div>
                         )}

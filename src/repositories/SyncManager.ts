@@ -1,6 +1,7 @@
 import { get, set, keys, setMany } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
 import { db } from '../config/firebase';
+import { env } from '../config/env';
 import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
 
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
@@ -42,6 +43,7 @@ export class SyncManager {
 
   async syncPending(): Promise<void> {
     if (!this.isOnline) return;
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
 
     const allKeys = await keys();
     const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('sync_'));
@@ -56,6 +58,7 @@ export class SyncManager {
 
   async syncDown(humanUserId: string, types: ('workout' | 'plan' | 'protocol')[] = ['workout', 'plan', 'protocol']): Promise<void> {
     if (!this.isOnline) return;
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
 
     for (const type of types) {
       const q = query(collection(db, 'users', humanUserId, `${type}Drafts`));
@@ -95,6 +98,7 @@ export class SyncManager {
   }
 
   private async uploadRecord(key: string, record: SyncRecord) {
+    if (env.firebase.apiKey === 'demo-key' || (env.isDev && !env.useEmulator)) return;
     const { envelope, type } = record;
     const docRef = doc(db, 'users', envelope.humanUserId, `${type}Drafts`, envelope.globalId);
 
@@ -134,16 +138,6 @@ export class SyncManager {
       }
       await set(key, record);
     }
-  }
-  async listSyncRecords(humanUserId: string, type: 'workout' | 'plan' | 'protocol'): Promise<SyncRecord[]> {
-    const allKeys = await keys();
-    const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`sync_${humanUserId}_${type}_`));
-    const records: SyncRecord[] = [];
-    for (const key of syncKeys) {
-      const record = await get<SyncRecord>(key as string);
-      if (record) records.push(record);
-    }
-    return records;
   }
 }
 

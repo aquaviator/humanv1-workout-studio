@@ -1,6 +1,6 @@
 {
-  "name": "HumanV1 Workout Studio",
-  "description": "Design and manage workouts, plans, and protocols.",
+  "name": "",
+  "description": "",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

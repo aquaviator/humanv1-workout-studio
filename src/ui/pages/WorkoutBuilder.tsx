@@ -1,20 +1,16 @@
-import { useParams } from "react-router";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { v4 as uuidv4 } from "uuid";
 import { Workout, Block, ExerciseBlock, Effort, MetricPrescription } from "../../domain/types";
-import { GripVertical, Plus, Trash2, Undo2, Redo2, Save, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
+import { GripVertical, Plus, Trash2, Undo2, Redo2, Save, ChevronUp, ChevronDown } from "lucide-react";
 import { catalogueRepository } from "../../repositories/FirebaseCatalogueRepository";
 import { Exercise } from "../../domain/catalogue";
 import { ExercisePicker } from "../components/ExercisePicker";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
-import { validateWorkout } from "../../domain/validation/workoutValidation";
-import { AthletePreview } from "../components/AthletePreview";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
-  const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
   const [exercisesData, setExercisesData] = React.useState<Exercise[]>([]);
   React.useEffect(() => { catalogueRepository.getExercises().then(setExercisesData); }, []);
   const [workoutId] = useState(() => uuidv4());
@@ -30,29 +26,21 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   });
 
   const [isExerciseDrawerOpen, setIsExerciseDrawerOpen] = useState(false);
-  const [exerciseTargetGroupId, setExerciseTargetGroupId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"builder" | "preview">("builder");
-
-  const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);
-
 
   useEffect(() => {
     let mounted = true;
-    if (routeWorkoutId) {
-      draftRepository.getWorkoutDraft(identity.humanUserId, routeWorkoutId).then((draft) => {
-        if (!mounted) return;
-        if (draft) {
-          reset(draft);
-        }
-        setIsLoading(false);
-      });
-    } else {
+    draftRepository.listWorkoutDrafts(identity.humanUserId).then((drafts) => {
+      if (!mounted) return;
+      if (drafts.length > 0) {
+        // Sort by updatedAt descending (which means we should grab the draft envelope, but since list returns Workout[], we just take the last one or maybe we should just use the first)
+        reset(drafts[0]);
+      }
       setIsLoading(false);
-    }
+    });
     return () => { mounted = false; };
-  }, [identity.humanUserId, reset, routeWorkoutId]);
+  }, [identity.humanUserId, reset]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -110,50 +98,8 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
         },
       ],
     };
-    if (exerciseTargetGroupId) {
-      setWorkout({
-        ...workout,
-        blocks: workout.blocks.map((block) =>
-          block.blockId === exerciseTargetGroupId && (block.type === "SUPERSET" || block.type === "CIRCUIT")
-            ? { ...block, exercises: [...block.exercises, newBlock] }
-            : block,
-        ),
-      });
-    } else {
-      setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
-    }
-    setExerciseTargetGroupId(null);
+    setWorkout({ ...workout, blocks: [...workout.blocks, newBlock] });
     setIsExerciseDrawerOpen(false);
-  };
-
-  const openExercisePicker = (groupId: string | null = null) => {
-    setExerciseTargetGroupId(groupId);
-    setIsExerciseDrawerOpen(true);
-  };
-
-  const removeGroupedExercise = (groupId: string, exerciseBlockId: string) => {
-    setWorkout({
-      ...workout,
-      blocks: workout.blocks.map((block) =>
-        block.blockId === groupId && (block.type === "SUPERSET" || block.type === "CIRCUIT")
-          ? { ...block, exercises: block.exercises.filter((exercise) => exercise.blockId !== exerciseBlockId) }
-          : block,
-      ),
-    });
-  };
-
-  const moveGroupedExercise = (groupId: string, index: number, direction: "up" | "down") => {
-    setWorkout({
-      ...workout,
-      blocks: workout.blocks.map((block) => {
-        if (block.blockId !== groupId || (block.type !== "SUPERSET" && block.type !== "CIRCUIT")) return block;
-        const targetIndex = direction === "up" ? index - 1 : index + 1;
-        if (targetIndex < 0 || targetIndex >= block.exercises.length) return block;
-        const exercises = [...block.exercises];
-        [exercises[index], exercises[targetIndex]] = [exercises[targetIndex], exercises[index]];
-        return { ...block, exercises };
-      }),
-    });
   };
 
   const removeBlock = (id: string) => {
@@ -176,171 +122,50 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     setWorkout({ ...workout, blocks: newBlocks });
   };
 
-  const addEffort = (blockId: string, parentBlockId?: string) => {
+  const addEffort = (blockId: string) => {
     setWorkout({
       ...workout,
       blocks: workout.blocks.map(b => {
-        if (parentBlockId && b.blockId === parentBlockId && (b.type === "SUPERSET" || b.type === "CIRCUIT")) {
-          return {
-            ...b,
-            exercises: b.exercises.map(ex => {
-              if (ex.blockId !== blockId) return ex;
-              const lastEffort = ex.efforts[ex.efforts.length - 1];
-              const newEffort = {
-                ...lastEffort,
-                effortId: uuidv4(),
-                prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: uuidv4() }))
-              };
-              return { ...ex, efforts: [...ex.efforts, newEffort] };
-            })
-          };
-        }
-        if (!parentBlockId && b.blockId === blockId && b.type === "EXERCISE") {
-          const lastEffort = b.efforts[b.efforts.length - 1];
-          const newEffort = {
-            ...lastEffort,
-            effortId: uuidv4(),
-            prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: uuidv4() }))
-          };
-          return { ...b, efforts: [...b.efforts, newEffort] };
-        }
-        return b;
+        if (b.blockId !== blockId || b.type !== "EXERCISE") return b;
+        const lastEffort = b.efforts[b.efforts.length - 1];
+        const newEffort = {
+          ...lastEffort,
+          effortId: uuidv4(),
+          prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: uuidv4() }))
+        };
+        return { ...b, efforts: [...b.efforts, newEffort] };
       })
     });
   };
 
-  const removeEffort = (blockId: string, effortId: string, parentBlockId?: string) => {
+  const removeEffort = (blockId: string, effortId: string) => {
     setWorkout({
       ...workout,
       blocks: workout.blocks.map(b => {
-        if (parentBlockId && b.blockId === parentBlockId && (b.type === "SUPERSET" || b.type === "CIRCUIT")) {
-          return {
-            ...b,
-            exercises: b.exercises.map(ex => {
-              if (ex.blockId !== blockId) return ex;
-              return { ...ex, efforts: ex.efforts.filter(e => e.effortId !== effortId) };
-            })
-          };
-        }
-        if (!parentBlockId && b.blockId === blockId && b.type === "EXERCISE") {
-          return { ...b, efforts: b.efforts.filter(e => e.effortId !== effortId) };
-        }
-        return b;
+        if (b.blockId !== blockId || b.type !== "EXERCISE") return b;
+        return { ...b, efforts: b.efforts.filter(e => e.effortId !== effortId) };
       })
     });
   };
 
-  const updateMetric = (blockId: string, effortId: string, prescriptionId: string, value: number, parentBlockId?: string) => {
+  const updateMetric = (blockId: string, effortId: string, prescriptionId: string, value: number) => {
     setWorkout({
       ...workout,
       blocks: workout.blocks.map(b => {
-        if (parentBlockId && b.blockId === parentBlockId && (b.type === "SUPERSET" || b.type === "CIRCUIT")) {
-          return {
-            ...b,
-            exercises: b.exercises.map(ex => {
-              if (ex.blockId !== blockId) return ex;
-              return {
-                ...ex,
-                efforts: ex.efforts.map(e => {
-                  if (e.effortId !== effortId) return e;
-                  return {
-                    ...e,
-                    prescriptions: e.prescriptions.map(p => p.prescriptionId === prescriptionId ? { ...p, targetValue: value } : p)
-                  };
-                })
-              };
-            })
-          };
-        }
-        if (!parentBlockId && b.blockId === blockId && b.type === "EXERCISE") {
-          return {
-            ...b,
-            efforts: b.efforts.map(e => {
-              if (e.effortId !== effortId) return e;
-              return {
-                ...e,
-                prescriptions: e.prescriptions.map(p => p.prescriptionId === prescriptionId ? { ...p, targetValue: value } : p)
-              };
-            })
-          };
-        }
-        return b;
+        if (b.blockId !== blockId || b.type !== "EXERCISE") return b;
+        return {
+          ...b,
+          efforts: b.efforts.map(e => {
+            if (e.effortId !== effortId) return e;
+            return {
+              ...e,
+              prescriptions: e.prescriptions.map(p => p.prescriptionId === prescriptionId ? { ...p, targetValue: value } : p)
+            };
+          })
+        };
       })
     });
   };
-
-  const updateEffortType = (blockId: string, effortId: string, value: string, parentBlockId?: string) => {
-    setWorkout({
-      ...workout,
-      blocks: workout.blocks.map(b => {
-        if (parentBlockId && b.blockId === parentBlockId && (b.type === "SUPERSET" || b.type === "CIRCUIT")) {
-          return {
-            ...b,
-            exercises: b.exercises.map(ex => {
-              if (ex.blockId !== blockId) return ex;
-              return {
-                ...ex,
-                efforts: ex.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as any } : e)
-              };
-            })
-          };
-        }
-        if (!parentBlockId && b.blockId === blockId && b.type === "EXERCISE") {
-          return {
-            ...b,
-            efforts: b.efforts.map(e => e.effortId === effortId ? { ...e, effortType: value as any } : e)
-          };
-        }
-        return b;
-      })
-    });
-  };
-
-  const renderExerciseBlock = (exBlock: ExerciseBlock, parentBlockId?: string) => (
-    <div key={exBlock.blockId} className="space-y-2 mt-2 border-t border-hv-border pt-2">
-      <div className="font-medium">{exBlock.exerciseNameSnapshot}</div>
-      {exBlock.efforts.map((effort, eIdx) => (
-        <div key={effort.effortId} className="flex flex-wrap items-center gap-2 md:gap-4 text-sm bg-hv-surface-2 p-2 rounded">
-          <span className="w-4 md:w-6 text-hv-text-muted font-mono">{eIdx + 1}</span>
-          <select
-            className="bg-transparent text-hv-text-muted border-none outline-none focus:text-hv-text min-w-[80px]"
-            value={effort.effortType}
-            onChange={(e) => updateEffortType(exBlock.blockId, effort.effortId, e.target.value, parentBlockId)}
-            aria-label={`Effort ${eIdx + 1} type`}
-          >
-            <option value="WARM_UP">Warm Up</option>
-            <option value="WORKING">Working</option>
-            <option value="DROP_SET">Drop Set</option>
-            <option value="FAILURE">Failure</option>
-            <option value="TIMED">Timed</option>
-          </select>
-
-          <div className="flex-1 flex flex-wrap gap-2 md:gap-4 items-center">
-            {effort.prescriptions.map((p) => (
-              <div key={p.prescriptionId} className="flex items-center bg-hv-bg rounded px-2 py-1 border border-hv-border focus-within:border-hv-primary" title={p.metricKey}>
-                <span className="text-hv-text-muted mr-2 text-xs uppercase hidden sm:block">{p.metricKey.replace('_', ' ')}</span>
-                <input
-                  type="number"
-                  className="bg-transparent w-16 outline-none text-right font-mono"
-                  value={p.targetValue || p.minimumValue || ""}
-                  onChange={(e) => updateMetric(exBlock.blockId, effort.effortId, p.prescriptionId, Number(e.target.value), parentBlockId)}
-                  aria-label={`${p.metricKey} target`}
-                />
-                <span className="text-hv-text-muted ml-1 text-xs select-none">{p.canonicalUnit}</span>
-              </div>
-            ))}
-          </div>
-
-          <button onClick={() => removeEffort(exBlock.blockId, effort.effortId, parentBlockId)} className="text-hv-text-muted hover:text-hv-error ml-auto p-1" aria-label="Remove effort">
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ))}
-      <button onClick={() => addEffort(exBlock.blockId, parentBlockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 mt-2 p-1">
-        <Plus className="w-4 h-4" /> Add effort
-      </button>
-    </div>
-  );
 
   return (
     <div className="flex h-full flex-col md:flex-row relative">
@@ -368,62 +193,21 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           </div>
         </div>
 
-        <div className="flex gap-4 border-b border-hv-border mb-6">
-          <button 
-            className={`pb-2 px-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'builder' ? 'border-hv-primary text-hv-primary' : 'border-transparent text-hv-text-muted hover:text-hv-text'}`}
-            onClick={() => setActiveTab('builder')}
-          >
-            Builder
-          </button>
-          <button 
-            className={`pb-2 px-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'preview' ? 'border-hv-primary text-hv-primary' : 'border-transparent text-hv-text-muted hover:text-hv-text'}`}
-            onClick={() => setActiveTab('preview')}
-          >
-            Preview
-            {validationErrors.length > 0 && (
-              <span className="bg-hv-error text-white text-[10px] w-4 h-4 flex items-center justify-center rounded-full">
-                {validationErrors.length}
-              </span>
-            )}
-          </button>
-        </div>
-
-        {validationErrors.length > 0 && activeTab === 'builder' && (
-          <div className="mb-6 p-4 bg-hv-surface-2 border border-hv-error rounded-lg text-sm">
-            <div className="flex items-center gap-2 text-hv-error font-medium mb-2">
-              <AlertCircle className="w-4 h-4" />
-              <span>Validation Errors</span>
-            </div>
-            <ul className="list-disc pl-5 space-y-1 text-hv-text-muted">
-              {validationErrors.map((err, idx) => (
-                <li key={idx}>
-                  <span className="font-semibold">{err.blockId ? `Block: ` : 'Workout: '}</span> 
-                  {err.message}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {activeTab === 'preview' ? (
-          <AthletePreview workout={workout} catalogue={exercisesData} />
-        ) : (
-          <>
-            <DragDropContext onDragEnd={onDragEnd}>
-            <Droppable droppableId="workout-blocks">
-              {(provided) => (
-                <div
-                  {...provided.droppableProps}
-                  ref={provided.innerRef}
-                  className="space-y-4 mb-8"
-                >
-                  {workout.blocks.map((block, index) => (
-                    <Draggable key={block.blockId} draggableId={block.blockId} index={index}>
-                      {(provided) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          className="bg-hv-surface-1 border border-hv-border rounded-lg p-4 flex gap-2 md:gap-4 flex-col md:flex-row"
+        <DragDropContext onDragEnd={onDragEnd}>
+          <Droppable droppableId="workout-blocks">
+            {(provided) => (
+              <div
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+                className="space-y-4 mb-8"
+              >
+                {workout.blocks.map((block, index) => (
+                  <Draggable key={block.blockId} draggableId={block.blockId} index={index}>
+                    {(provided) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className="bg-hv-surface-1 border border-hv-border rounded-lg p-4 flex gap-2 md:gap-4 flex-col md:flex-row"
                       >
                         <div className="flex justify-between items-center md:hidden mb-2">
                            <div {...provided.dragHandleProps} className="text-hv-text-muted flex items-center justify-center cursor-grab active:cursor-grabbing p-1" aria-label="Drag handle">
@@ -484,43 +268,31 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                           {block.type === "SUPERSET" && (
                             <div className="space-y-4">
                               <p className="text-sm text-hv-text-muted">A superset groups multiple exercises performed sequentially with minimal rest.</p>
-                              {block.exercises.map((exBlock, i) => (
-                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border flex flex-col gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex-1 font-medium">{exBlock.exerciseNameSnapshot}</div>
-                                    <button onClick={() => moveGroupedExercise(block.blockId, i, "up")} disabled={i === 0} aria-label={`Move ${exBlock.exerciseNameSnapshot} up`} className="p-2 disabled:opacity-30"><ChevronUp className="w-4 h-4" /></button>
-                                    <button onClick={() => moveGroupedExercise(block.blockId, i, "down")} disabled={i === block.exercises.length - 1} aria-label={`Move ${exBlock.exerciseNameSnapshot} down`} className="p-2 disabled:opacity-30"><ChevronDown className="w-4 h-4" /></button>
-                                    <button onClick={() => removeGroupedExercise(block.blockId, exBlock.blockId)} aria-label={`Remove ${exBlock.exerciseNameSnapshot} from superset`} className="p-2 text-hv-error"><Trash2 className="w-4 h-4" /></button>
-                                  </div>
-                                  {renderExerciseBlock(exBlock, block.blockId)}
+                              {block.exercises && block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
+                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
+                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
                                 </div>
                               ))}
-                              <button onClick={() => openExercisePicker(block.blockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 p-2"><Plus className="w-4 h-4" /> Add exercise to superset</button>
+                              <div className="text-sm text-hv-primary">Select an exercise from the library and drag it here (TBD in v1.1)</div>
                             </div>
                           )}
                           {block.type === "CIRCUIT" && (
                             <div className="space-y-4">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm">Rounds:</span>
-                                <input type="number" min={1} max={99} aria-label="Circuit rounds" className="w-16 bg-hv-bg border border-hv-border rounded px-2 py-1 text-sm" value={block.rounds} onChange={(e) => {
-                                  const rounds = Math.max(1, Math.min(99, Number(e.target.value) || 1));
-                                  const updated = workout.blocks.map(b => b.blockId === block.blockId && b.type === "CIRCUIT" ? { ...b, rounds } : b);
-                                  setWorkout({ ...workout, blocks: updated });
+                                <input type="number" className="w-16 bg-hv-bg border border-hv-border rounded px-2 py-1 text-sm" value={block.rounds || 3} onChange={(e) => {
+                                  const updated = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, rounds: Number(e.target.value) } : b);
+                                  setWorkout({ ...workout, blocks: updated as any[] });
                                 }} />
                               </div>
                               <p className="text-sm text-hv-text-muted">A circuit repeats all exercises for the specified rounds.</p>
-                              {block.exercises.map((exBlock, i) => (
-                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border flex flex-col gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex-1 font-medium">{exBlock.exerciseNameSnapshot}</div>
-                                    <button onClick={() => moveGroupedExercise(block.blockId, i, "up")} disabled={i === 0} aria-label={`Move ${exBlock.exerciseNameSnapshot} up`} className="p-2 disabled:opacity-30"><ChevronUp className="w-4 h-4" /></button>
-                                    <button onClick={() => moveGroupedExercise(block.blockId, i, "down")} disabled={i === block.exercises.length - 1} aria-label={`Move ${exBlock.exerciseNameSnapshot} down`} className="p-2 disabled:opacity-30"><ChevronDown className="w-4 h-4" /></button>
-                                    <button onClick={() => removeGroupedExercise(block.blockId, exBlock.blockId)} aria-label={`Remove ${exBlock.exerciseNameSnapshot} from circuit`} className="p-2 text-hv-error"><Trash2 className="w-4 h-4" /></button>
-                                  </div>
-                                  {renderExerciseBlock(exBlock, block.blockId)}
+                              {block.exercises && block.exercises.map((exBlock, i) => (
+                                <div key={exBlock.blockId} className="p-3 bg-hv-surface-2 rounded-lg border border-hv-border">
+                                  <div className="font-medium mb-2">{exBlock.exerciseNameSnapshot}</div>
+                                  <div className="text-sm text-hv-text-muted">{exBlock.efforts.length} effort(s)</div>
                                 </div>
                               ))}
-                              <button onClick={() => openExercisePicker(block.blockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 p-2"><Plus className="w-4 h-4" /> Add exercise to circuit</button>
                             </div>
                           )}
 
@@ -541,7 +313,50 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                           )}
                           {block.type === "EXERCISE" && (
                             <div className="space-y-2">
-                              {renderExerciseBlock(block)}
+                              {block.efforts.map((effort, eIdx) => (
+                                <div key={effort.effortId} className="flex flex-wrap items-center gap-2 md:gap-4 text-sm bg-hv-surface-2 p-2 rounded">
+                                  <span className="w-4 md:w-6 text-hv-text-muted font-mono">{eIdx + 1}</span>
+                                  <select
+                                    className="bg-transparent text-hv-text-muted border-none outline-none focus:text-hv-text min-w-[80px]"
+                                    value={effort.effortType}
+                                    onChange={(e) => {
+                                      const updatedEfforts = [...block.efforts];
+                                      updatedEfforts[eIdx].effortType = e.target.value as any;
+                                      const updatedBlocks = workout.blocks.map(b => b.blockId === block.blockId ? { ...b, efforts: updatedEfforts } : b);
+                                      setWorkout({ ...workout, blocks: updatedBlocks as Block[] });
+                                    }}
+                                    aria-label={`Effort ${eIdx + 1} type`}
+                                  >
+                                    <option value="WARM_UP">Warm Up</option>
+                                    <option value="WORKING">Working</option>
+                                    <option value="DROP_SET">Drop Set</option>
+                                    <option value="FAILURE">Failure</option>
+                                    <option value="TIMED">Timed</option>
+                                  </select>
+
+                                  <div className="flex-1 flex flex-wrap gap-2 md:gap-4 items-center">
+                                    {effort.prescriptions.map((p) => (
+                                      <div key={p.prescriptionId} className="flex items-center bg-hv-bg rounded px-2 py-1 border border-hv-border focus-within:border-hv-primary">
+                                        <input
+                                          type="number"
+                                          className="bg-transparent w-12 outline-none text-right font-mono"
+                                          value={p.targetValue || p.minimumValue || ""}
+                                          onChange={(e) => updateMetric(block.blockId, effort.effortId, p.prescriptionId, Number(e.target.value))}
+                                          aria-label={`${p.metricKey} target`}
+                                        />
+                                        <span className="text-hv-text-muted ml-1 text-xs select-none">{p.canonicalUnit}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <button onClick={() => removeEffort(block.blockId, effort.effortId)} className="text-hv-text-muted hover:text-hv-error ml-auto p-1" aria-label="Remove effort">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                              <button onClick={() => addEffort(block.blockId)} className="text-sm text-hv-primary hover:text-hv-primary-hover flex items-center gap-1 mt-2 p-1">
+                                <Plus className="w-4 h-4" /> Add effort
+                              </button>
                             </div>
                           )}
                         </div>
@@ -565,7 +380,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
         <div className="flex flex-col sm:flex-row gap-4 mt-8 flex-wrap">
           <button
-            onClick={() => openExercisePicker()}
+            onClick={() => setIsExerciseDrawerOpen(true)}
             className="flex-1 border-2 border-dashed border-hv-border hover:border-hv-primary text-hv-text-muted hover:text-hv-primary rounded-lg p-4 flex items-center justify-center gap-2 transition-colors"
           >
             <Plus className="w-5 h-5" />
@@ -634,16 +449,14 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <span>Add Note</span>
           </button>
         </div>
-        </>
-        )}
-      </div>
+</div>
 
       {/* Exercise Drawer */}
       {isExerciseDrawerOpen && (
         <ExercisePicker
           exercises={exercisesData}
           onSelect={addExercise}
-          onClose={() => { setExerciseTargetGroupId(null); setIsExerciseDrawerOpen(false); }}
+          onClose={() => setIsExerciseDrawerOpen(false)}
         />
       )}
     </div>
