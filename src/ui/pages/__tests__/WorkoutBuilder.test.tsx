@@ -31,6 +31,13 @@ vi.mock('idb-keyval', () => {
   };
 });
 
+vi.mock('../../../repositories/FirebaseCatalogueRepository', () => ({
+  catalogueRepository: { getExercises: vi.fn(() => Promise.resolve([
+    { exerciseId: 'bench-press', name: 'Bench Press', category: 'Strength', equipment: [], aliases: [], metricProfile: { primary: ['repetition_count'], secondary: ['external_load'], optional: [], unsupported: [] } },
+    { exerciseId: 'treadmill-run', name: 'Treadmill Run', category: 'Cardio', equipment: [], aliases: [], metricProfile: { primary: ['duration'], secondary: [], optional: [], unsupported: [] } },
+  ])) },
+}));
+
 describe('WorkoutBuilder', () => {
   it('renders correctly', () => {
     render(<MemoryRouter><WorkoutBuilder identity={mockIdentity} /></MemoryRouter>);

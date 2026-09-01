@@ -76,7 +76,7 @@ describe('Firestore Security Rules', () => {
   it('rejects malformed publication contract fields', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const valid = published('human_1', 'workout-1', 'workout');
-    const base = doc(alice, 'users', 'human_1', 'publishedWorkouts');
+    const base = collection(alice, 'users', 'human_1', 'publishedWorkouts');
     await assertFails(setDoc(doc(base, 'bad-schema'), { ...valid, versionId: 'bad-schema', schemaVersion: 1 }));
     await assertFails(setDoc(doc(base, 'bad-type'), { ...valid, versionId: 'bad-type', contentType: 'plan' }));
     await assertFails(setDoc(doc(base, 'bad-revision'), { ...valid, versionId: 'bad-revision', revision: 0 }));

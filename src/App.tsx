@@ -4,6 +4,7 @@ import { cn } from "./lib/utils";
 import React, { useState, useEffect, Suspense } from "react";
 import { authRepository } from "./repositories/AuthManager";
 import { HumanIdentity } from "./domain/identity";
+import { env } from "./config/env";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
 const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
@@ -87,15 +88,13 @@ export default function App() {
         <div className="max-w-md w-full bg-hv-surface-1 border border-hv-border rounded-xl p-8 text-center">
           <h1 className="text-2xl font-bold mb-2">HumanV1 Workout Studio</h1>
           <p className="text-hv-text-muted mb-8">Sign in to design and manage your workouts and plans.</p>
-          <div className="text-xs text-hv-warning mb-4 p-2 bg-hv-surface-2 rounded border border-hv-warning/30">
-            Local Development Mode
-          </div>
+          {env.isDev && <div className="text-xs text-hv-warning mb-4 p-2 bg-hv-surface-2 rounded border border-hv-warning/30">Local Development Mode</div>}
           <button 
             onClick={handleSignIn}
             className="w-full bg-hv-primary hover:bg-hv-primary-hover text-white rounded-md py-3 font-medium flex items-center justify-center gap-2 transition-colors"
           >
             <LogIn className="w-5 h-5" />
-            Sign in with Local Dev Identity
+            {env.isDev ? 'Sign in with Local Dev Identity' : 'Sign in with Google'}
           </button>
         </div>
       </div>

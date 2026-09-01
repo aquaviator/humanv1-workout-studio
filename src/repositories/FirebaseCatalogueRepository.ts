@@ -1,8 +1,7 @@
-import { CatalogueRepository, Exercise } from '../domain/catalogue';
+import { CatalogueRepository, Exercise, MetricProfile } from '../domain/catalogue';
 import { db } from '../config/firebase';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import * as idb from 'idb-keyval';
-import fallbackExercises from '../fixtures/exercises.json';
 import { sha256 } from 'js-sha256';
 
 const IDB_CATALOGUE_ENVELOPE_KEY = 'humanv1_catalogue_envelope';
@@ -40,7 +39,7 @@ function asExercise(value: Json): Exercise {
     category: typeof value.category === 'string' ? value.category : '',
     equipment: Array.isArray(value.equipment) ? value.equipment.filter((v): v is string => typeof v === 'string') : [],
     aliases: Array.isArray(value.aliases) ? value.aliases.filter((v): v is string => typeof v === 'string') : [],
-    metricProfile: value.metricProfile as any,
+    metricProfile: metricProfile(value.metricProfile),
     primaryMuscles: strings(value.primaryMuscles),
     secondaryMuscles: strings(value.secondaryMuscles),
     muscleArea: strings(value.muscleArea),
@@ -55,6 +54,14 @@ function asExercise(value: Json): Exercise {
   };
 }
 
+function metricProfile(value: Json | undefined): MetricProfile {
+  if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Exercise metric profile is invalid');
+  const required = ['primary', 'secondary', 'optional', 'unsupported'] as const;
+  const result = required.map(key => value[key]);
+  if (!result.every(item => Array.isArray(item) && item.every(entry => typeof entry === 'string'))) throw new Error('Exercise metric profile is invalid');
+  return { primary: result[0] as string[], secondary: result[1] as string[], optional: result[2] as string[], unsupported: result[3] as string[] };
+}
+
 function strings(value: Json | undefined): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
 }
@@ -62,7 +69,9 @@ function strings(value: Json | undefined): string[] | undefined {
 export class FirebaseCatalogueRepository implements CatalogueRepository {
   async getExercises(): Promise<Exercise[]> {
     const local = await idb.get<CatalogueEnvelope>(IDB_CATALOGUE_ENVELOPE_KEY);
-    return local?.exercises?.length ? local.exercises : fallbackExercises as Exercise[];
+    if (local?.exercises?.length) return local.exercises;
+    await this.syncCatalogue();
+    return (await idb.get<CatalogueEnvelope>(IDB_CATALOGUE_ENVELOPE_KEY))?.exercises ?? [];
   }
 
   async syncCatalogue(): Promise<void> {

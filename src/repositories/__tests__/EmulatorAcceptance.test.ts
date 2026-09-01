@@ -37,11 +37,11 @@ beforeAll(async () => {
   await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 2' });
   
   // Seed catalogue
-  const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], targetMuscles: [], category: '', aliases: [], metricProfile: 'REPS_ONLY' };
+  const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], category: '', aliases: [], metricProfile: { primary: ['repetitions'], secondary: [], optional: [], unsupported: [] } };
   const computedChecksum = catalogueChecksum([mockExercise]);
   
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
-  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: "humanv1.workout/1", status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
+  await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: 1, status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
   await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set(mockExercise);
 });
 
@@ -158,8 +158,10 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
     const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', validWorkout('workout_hack', 'hacked'), []);
     await syncManager.syncPending();
-    const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId));
-    expect(remote.exists()).toBe(false);
+    await expect(getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId))).rejects.toMatchObject({ code: 'permission-denied' });
+    const record = (await syncManager.listPublicationSyncRecords('human_1', 'workout')).find(item => item.envelope.globalId === 'workout_hack');
+    expect(record?.status).toBe('CONFLICT');
+    expect(record?.lastErrorCode).toBe('PERMISSION_DENIED');
   });
 
   it('Authentication and trusted identity gating', async () => {

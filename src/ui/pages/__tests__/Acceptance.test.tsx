@@ -38,6 +38,13 @@ vi.mock('idb-keyval', () => {
   };
 });
 
+vi.mock('../../../repositories/FirebaseCatalogueRepository', () => ({
+  catalogueRepository: { getExercises: vi.fn(() => Promise.resolve([
+    { exerciseId: 'bench_press', name: 'Bench Press', category: 'Strength', equipment: ['Barbell'], aliases: [], metricProfile: { primary: ['repetition_count', 'external_load'], secondary: [], optional: [], unsupported: ['distance'] } },
+    { exerciseId: 'treadmill_run', name: 'Treadmill Run', category: 'Cardio', equipment: ['Treadmill'], aliases: [], metricProfile: { primary: ['duration', 'distance'], secondary: [], optional: [], unsupported: ['repetition_count', 'external_load'] } },
+  ])) },
+}));
+
 
 const { workoutsDb, protocolsDb, plansDb } = vi.hoisted(() => {
   const w = new Map();
