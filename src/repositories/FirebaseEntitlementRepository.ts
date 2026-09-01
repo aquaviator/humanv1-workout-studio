@@ -1,119 +1,110 @@
 import { Entitlement, EntitlementRepository, EntitlementState } from '../domain/entitlement';
-import { auth, db } from '../config/firebase';
-import { doc, getDoc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { auth } from '../config/firebase';
 import * as idb from 'idb-keyval';
 
-interface EntitlementReceipt {
-  humanUserId: string;
-  authUid: string;
-  state: EntitlementState;
-  expiresAt: string | null;
-  cachedAt: string;
+const ACCOUNT_TRIAL_ENDPOINT = 'https://europe-west1-hv1-platform.cloudfunctions.net/initializeAccountTrial';
+const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface AccountTrialResponse {
+  status: 'ACTIVE' | 'EXPIRED' | 'DISABLED';
+  trialStartedAtMillis?: number;
+  trialEndsAtMillis?: number;
+  serverNowMillis: number;
 }
 
-const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+interface EntitlementReceipt {
+  schemaVersion: 1;
+  humanUserId: string;
+  authUid: string;
+  state: Extract<EntitlementState, 'TRIAL_ACTIVE' | 'EXPIRED' | 'UNENTITLED'>;
+  trialStartedAtMillis: number | null;
+  expiresAtMillis: number | null;
+  verifiedServerNowMillis: number;
+  offlineValidUntilMillis: number;
+}
+
+type Fetcher = typeof fetch;
 
 export class FirebaseEntitlementRepository implements EntitlementRepository {
+  constructor(
+    private readonly fetcher: Fetcher = fetch,
+    private readonly now: () => number = Date.now,
+    private readonly endpoint: string = ACCOUNT_TRIAL_ENDPOINT
+  ) {}
+
   private getCacheKey(humanUserId: string) {
     return `entitlement_receipt_${humanUserId}`;
   }
 
   async getEntitlement(humanUserId: string): Promise<Entitlement> {
-    const authUid = auth.currentUser?.uid;
-    if (!authUid) return { state: 'EXPIRED' };
+    const user = auth.currentUser;
+    if (!user) return { state: 'VERIFICATION_UNAVAILABLE' };
 
     try {
-      const account = await getDoc(doc(db, 'accounts', authUid));
-      if (!account.exists() || account.data().humanUserId !== humanUserId || account.data().status !== 'ACTIVE') return { state: 'EXPIRED' };
-      const docRef = doc(db, 'accounts', authUid, 'entitlements', 'current');
-      const snapshot = await getDoc(docRef);
-      if (!snapshot.exists()) {
-        return { state: 'EXPIRED' };
-      }
-      const data = snapshot.data();
-      const receipt: EntitlementReceipt = {
-        humanUserId,
-        authUid,
-        state: this.mapState(data.state),
-        expiresAt: this.toIso(data.expiresAt),
-        cachedAt: new Date().toISOString()
-      };
+      const idToken = await user.getIdToken(false);
+      const response = await this.fetcher(this.endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!response.ok) throw new Error(`Trial verification returned ${response.status}`);
+
+      const payload = await response.json() as AccountTrialResponse;
+      const receipt = this.toReceipt(payload, humanUserId, user.uid);
       await idb.set(this.getCacheKey(humanUserId), receipt);
-      
       return this.checkValidity(receipt);
-    } catch (e) {
-      // Fallback to cache
+    } catch {
       const cached = await idb.get<EntitlementReceipt>(this.getCacheKey(humanUserId));
-      if (cached && cached.authUid === authUid) {
-         return this.checkValidity(cached);
+      if (cached?.schemaVersion === 1 && cached.authUid === user.uid && cached.humanUserId === humanUserId) {
+        return this.checkValidity(cached);
       }
       return { state: 'VERIFICATION_UNAVAILABLE' };
     }
   }
 
   onEntitlementChanged(humanUserId: string, callback: (entitlement: Entitlement) => void): () => void {
-    const authUidAtSubscribe = auth.currentUser?.uid;
-    if (!authUidAtSubscribe) { callback({ state: 'EXPIRED' }); return () => undefined; }
-    const docRef = doc(db, 'accounts', authUidAtSubscribe, 'entitlements', 'current');
+    let cancelled = false;
     callback({ state: 'CHECKING' });
-    
-    return onSnapshot(docRef, async (snapshot) => {
-      const authUid = auth.currentUser?.uid;
-      if (!authUid) {
-        callback({ state: 'EXPIRED' });
-        return;
-      }
-      
-      if (!snapshot.exists()) {
-        callback({ state: 'EXPIRED' });
-      } else {
-        const data = snapshot.data();
-        const receipt: EntitlementReceipt = {
-          humanUserId,
-          authUid,
-          state: this.mapState(data.state),
-          expiresAt: this.toIso(data.expiresAt),
-          cachedAt: new Date().toISOString()
-        };
-        await idb.set(this.getCacheKey(humanUserId), receipt);
-        callback(this.checkValidity(receipt));
-      }
-    }, async (error) => {
-      const authUid = auth.currentUser?.uid;
-      const cached = await idb.get<EntitlementReceipt>(this.getCacheKey(humanUserId));
-      if (cached && cached.authUid === authUid) {
-         callback(this.checkValidity(cached));
-      } else {
-        callback({ state: 'VERIFICATION_UNAVAILABLE' });
-      }
+    void this.getEntitlement(humanUserId).then(entitlement => {
+      if (!cancelled) callback(entitlement);
     });
+    return () => { cancelled = true; };
+  }
+
+  private toReceipt(payload: AccountTrialResponse, humanUserId: string, authUid: string): EntitlementReceipt {
+    if (!Number.isFinite(payload.serverNowMillis) || payload.serverNowMillis <= 0) throw new Error('Malformed server time');
+
+    if (payload.status === 'DISABLED') {
+      return {
+        schemaVersion: 1, humanUserId, authUid, state: 'UNENTITLED',
+        trialStartedAtMillis: null, expiresAtMillis: null,
+        verifiedServerNowMillis: payload.serverNowMillis,
+        offlineValidUntilMillis: payload.serverNowMillis
+      };
+    }
+
+    const startedAt = payload.trialStartedAtMillis;
+    const endsAt = payload.trialEndsAtMillis;
+    if (!Number.isFinite(startedAt) || !Number.isFinite(endsAt) || startedAt! <= 0 || endsAt! <= startedAt!) {
+      throw new Error('Malformed introductory access receipt');
+    }
+    const state = payload.status === 'ACTIVE' ? 'TRIAL_ACTIVE' : 'EXPIRED';
+    return {
+      schemaVersion: 1, humanUserId, authUid, state,
+      trialStartedAtMillis: startedAt!, expiresAtMillis: endsAt!,
+      verifiedServerNowMillis: payload.serverNowMillis,
+      offlineValidUntilMillis: Math.min(endsAt!, payload.serverNowMillis + MAX_OFFLINE_MS)
+    };
   }
 
   private checkValidity(receipt: EntitlementReceipt): Entitlement {
-    const now = new Date().getTime();
-    if (receipt.expiresAt && new Date(receipt.expiresAt).getTime() < now) {
-      return { state: 'EXPIRED' };
-    }
-    const cachedTime = new Date(receipt.cachedAt).getTime();
-    if (now - cachedTime > MAX_OFFLINE_MS) {
-       return { state: 'EXPIRED' };
-    }
-    return { state: receipt.state };
-  }
+    if (receipt.state === 'EXPIRED') return { state: 'EXPIRED' };
+    if (receipt.state === 'UNENTITLED') return { state: 'UNENTITLED' };
 
-  private mapState(state: any): EntitlementState {
-    const aliases: Record<string, EntitlementState> = { ACTIVE_TRIAL: 'TRIAL_ACTIVE', ACTIVE_SUBSCRIPTION: 'ACTIVE' };
-    if (typeof state === 'string' && aliases[state]) return aliases[state];
-    if (['TRIAL_ACTIVE', 'ACTIVE', 'CANCELLED_ACTIVE', 'GRACE_PERIOD', 'ACCOUNT_HOLD', 'PAUSED', 'PENDING', 'EXPIRED', 'REVOKED'].includes(state)) {
-      return state as EntitlementState;
-    }
-    return 'EXPIRED';
-  }
-
-  private toIso(value: unknown): string | null {
-    if (value instanceof Timestamp) return value.toDate().toISOString();
-    if (value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate(): Date }).toDate().toISOString();
-    return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null;
+    const observedNow = Math.max(this.now(), receipt.verifiedServerNowMillis);
+    if (receipt.expiresAtMillis === null || observedNow >= receipt.expiresAtMillis) return { state: 'EXPIRED' };
+    if (observedNow > receipt.offlineValidUntilMillis) return { state: 'VERIFICATION_UNAVAILABLE' };
+    return { state: 'TRIAL_ACTIVE' };
   }
 }
 
