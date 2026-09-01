@@ -1,3 +1,4 @@
+import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { v4 as uuidv4 } from "uuid";
@@ -13,6 +14,7 @@ import { validateWorkout } from "../../domain/validation/workoutValidation";
 import { AthletePreview } from "../components/AthletePreview";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
+  const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
   const [exercisesData, setExercisesData] = React.useState<Exercise[]>([]);
   React.useEffect(() => { catalogueRepository.getExercises().then(setExercisesData); }, []);
   const [workoutId] = useState(() => uuidv4());
@@ -38,16 +40,19 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
 
   useEffect(() => {
     let mounted = true;
-    draftRepository.listWorkoutDrafts(identity.humanUserId).then((drafts) => {
-      if (!mounted) return;
-      if (drafts.length > 0) {
-        // Sort by updatedAt descending (which means we should grab the draft envelope, but since list returns Workout[], we just take the last one or maybe we should just use the first)
-        reset(drafts[0]);
-      }
+    if (routeWorkoutId) {
+      draftRepository.getWorkoutDraft(identity.humanUserId, routeWorkoutId).then((draft) => {
+        if (!mounted) return;
+        if (draft) {
+          reset(draft);
+        }
+        setIsLoading(false);
+      });
+    } else {
       setIsLoading(false);
-    });
+    }
     return () => { mounted = false; };
-  }, [identity.humanUserId, reset]);
+  }, [identity.humanUserId, reset, routeWorkoutId]);
 
   useEffect(() => {
     if (isLoading) return;

@@ -27,6 +27,9 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
   }, [identity.humanUserId]);
 
   const handleDiscardLocal = async (record: SyncRecord) => {
+    if (!window.confirm("Are you sure you want to discard local changes and use the remote version? This cannot be undone.")) {
+      return;
+    }
     try {
       const docRef = doc(db, 'users', identity.humanUserId, `${record.type}Drafts`, record.envelope.globalId);
       const snap = await getDoc(docRef);
@@ -34,6 +37,9 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
         const remoteData = snap.data();
         const localKey = `drafts_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
         await set(localKey, remoteData);
+      } else {
+        const localKey = `drafts_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
+        await del(localKey);
       }
       
       const syncKey = `sync_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
@@ -45,17 +51,25 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
   };
 
   const handleForceOverwrite = async (record: SyncRecord) => {
+    if (!window.confirm("Are you sure you want to force overwrite the remote version? This will overwrite changes made on another device.")) {
+      return;
+    }
     try {
       const docRef = doc(db, 'users', identity.humanUserId, `${record.type}Drafts`, record.envelope.globalId);
       const snap = await getDoc(docRef);
       let newRevision = record.envelope.revision + 1;
       
       if (snap.exists()) {
-        newRevision = Math.max(newRevision, snap.data().revision + 1);
+        const remoteData = snap.data();
+        if (remoteData.humanUserId !== identity.humanUserId) {
+           throw new Error("Cannot overwrite draft belonging to another user.");
+        }
+        newRevision = Math.max(newRevision, remoteData.revision + 1);
       }
 
       const updatedEnvelope = {
         ...record.envelope,
+        humanUserId: identity.humanUserId,
         revision: newRevision,
         updatedAt: new Date().toISOString()
       };

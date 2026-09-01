@@ -1,3 +1,4 @@
+import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Protocol, ProtocolSegment } from "../../domain/types";
@@ -9,6 +10,7 @@ import { validateProtocol } from "../../domain/validation/protocolValidation";
 import { AthleteProtocolPreview } from "../components/AthleteProtocolPreview";
 
 export default function ProtocolBuilder({ identity }: { identity: HumanIdentity }) {
+  const { protocolId: routeProtocolId } = useParams<{ protocolId: string }>();
   const [protocolId] = useState(() => uuidv4());
   
   const initialProtocol: Protocol = {
@@ -36,15 +38,19 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
 
   useEffect(() => {
     let mounted = true;
-    draftRepository.listProtocolDrafts(identity.humanUserId).then((drafts) => {
-      if (!mounted) return;
-      if (drafts.length > 0) {
-        reset(drafts[0]);
-      }
+    if (routeProtocolId) {
+      draftRepository.getProtocolDraft(identity.humanUserId, routeProtocolId).then((draft) => {
+        if (!mounted) return;
+        if (draft) {
+          reset(draft);
+        }
+        setIsLoading(false);
+      });
+    } else {
       setIsLoading(false);
-    });
+    }
     return () => { mounted = false; };
-  }, [identity.humanUserId, reset]);
+  }, [identity.humanUserId, reset, routeProtocolId]);
 
   useEffect(() => {
     if (isLoading) return;

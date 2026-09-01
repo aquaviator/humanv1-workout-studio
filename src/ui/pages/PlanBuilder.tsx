@@ -1,4 +1,6 @@
+import { useParams } from "react-router";
 import React, { useState, useEffect } from "react";
+import { useParams } from "react-router";
 import { v4 as uuidv4 } from "uuid";
 import { format, addDays, startOfWeek } from "date-fns";
 import { draftRepository } from "../../repositories/DraftRepository";
@@ -8,8 +10,11 @@ import { Dumbbell, Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
 import { HumanIdentity } from "../../domain/identity";
 import { Plan } from "../../domain/types";
+import { validatePlan } from "../../domain/validation/planValidation";
+import { AlertCircle } from "lucide-react";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
+  const { planId: routePlanId } = useParams<{ planId: string }>();
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
   React.useEffect(() => { 
@@ -60,6 +65,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const availableWorkouts = workoutsData;
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
+  const validationErrors = React.useMemo(() => validatePlan(plan), [plan]);
 
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -90,11 +96,13 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading]);
 
+  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
+
   if (isLoading || !workoutsLoaded) {
     return <div className="p-8 text-center text-hv-text-muted">Loading...</div>;
   }
 
-  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
+
 
   const addWeek = () => {
     const newWeekIndex = plan.weeks.length;
@@ -254,9 +262,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         )}
       </div>
       
-      <div className="bg-hv-surface-1 py-1 px-4 text-xs text-hv-text-muted text-center border-b border-hv-border">
-        Keyboard users: Use <kbd className="bg-hv-bg border border-hv-border px-1 rounded">Space</kbd> to lift an item, arrows to move, and <kbd className="bg-hv-bg border border-hv-border px-1 rounded">Space</kbd> to drop.
-      </div>
+
       
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
@@ -344,11 +350,26 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                               </div>
                             </div>
                             
-                            {/* Mobile-friendly Add buttons when drag is hard */}
-                            <div className="flex gap-1">
-                              <button onClick={() => addWorkoutToDay(workout.workoutId, 1)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Monday">Mon</button>
-                              <button onClick={() => addWorkoutToDay(workout.workoutId, 3)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Wednesday">Wed</button>
-                              <button onClick={() => addWorkoutToDay(workout.workoutId, 5)} className="text-xs bg-hv-surface-2 p-1 rounded" aria-label="Add to Friday">Fri</button>
+                            <div className="flex gap-1 items-center">
+                              <select 
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    addWorkoutToDay(workout.workoutId, parseInt(e.target.value));
+                                    e.target.value = "";
+                                  }
+                                }}
+                                className="text-xs bg-hv-surface-2 p-1 rounded border border-hv-border"
+                                aria-label="Add workout to day"
+                              >
+                                <option value="">Add to...</option>
+                                <option value="1">Monday</option>
+                                <option value="2">Tuesday</option>
+                                <option value="3">Wednesday</option>
+                                <option value="4">Thursday</option>
+                                <option value="5">Friday</option>
+                                <option value="6">Saturday</option>
+                                <option value="7">Sunday</option>
+                              </select>
                             </div>
                           </div>
                         )}
