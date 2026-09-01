@@ -55,7 +55,7 @@ export class PublicationRepository {
       versionId,
       globalId,
       contentType,
-      schemaVersion: (payload as any).schemaVersion || 1,
+      schemaVersion: payload.schemaVersion || 1,
       humanUserId: userId,
       revision,
       publicationState: 'PUBLISHED',

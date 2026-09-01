@@ -46,7 +46,15 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     
-    const workoutPayload = {} as any;
+    const workoutPayload: any = {
+      schemaVersion: "1",
+      workoutId: "workout_1",
+      title: "My Workout",
+      discipline: "STRENGTH" as "STRENGTH",
+      catalogueReleaseId: "v1",
+      tags: [],
+      blocks: []
+    };
     
     // Publish
     const pub1 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
@@ -79,13 +87,29 @@ describe('Emulator Acceptance', () => {
   it('Publication: Protocol compiled timeline round-trips', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     
-    const protoPayload = { schemaVersion: "humanv1.protocol/1" as any, summary: "" as any, protocolType: "HIIT" as any, status: "DRAFT" as any, description: "" as any, suitability: [] as any, equipmentCapabilityKeys: [] as any, evidence: [] as any, protocolId: "proto_1",
+    const protoPayload: import("../../domain/types").Protocol = {
+      schemaVersion: "1",
+      protocolId: "proto_1",
       title: "My Proto",
-      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK" as any, targets: [] as any, exerciseSlotCount: 0, instructions: "" }]
+      summary: "",
+      protocolType: "HIIT",
+      status: "DRAFT" as "DRAFT",
+      suitability: [],
+      equipmentCapabilityKeys: [],
+      evidence: [],
+      segments: [{
+        segmentId: "s1",
+        phase: "WORK" as "WORK",
+        durationSeconds: 30,
+        repeatCount: 2,
+        targets: [],
+        exerciseSlotCount: 0,
+        instructions: ""
+      }]
     };
     const compiled = [
-      { segmentId: "s1", iteration: 0, phase: "WORK", durationSeconds: 30, startTime: 0 },
-      { segmentId: "s1", iteration: 1, phase: "WORK", durationSeconds: 30, startTime: 30 }
+      { segmentId: "s1", iteration: 0, phase: "WORK" as "WORK", durationSeconds: 30, startTime: 0 },
+      { segmentId: "s1", iteration: 1, phase: "WORK" as "WORK", durationSeconds: 30, startTime: 30 }
     ];
     
     const pub = await publicationRepository.publish('human_1', 'protocol', protoPayload.protocolId, protoPayload, ['HIIT'], compiled);
@@ -99,7 +123,26 @@ describe('Emulator Acceptance', () => {
   it('Publication: Plan references exact published Workout versions', async () => {
      // A Plan placement requires workoutVersionId
      await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
-     const planPayload = {} as any;
+     const planPayload: import("../../domain/types").Plan = {
+      schemaVersion: "1",
+      planId: "plan_1",
+      title: "My Plan",
+      description: "",
+      weeks: [{
+        weekId: "w1",
+        weekNumber: 1,
+        label: "W1",
+        placements: [{
+          placementId: "p1",
+          dayOfWeek: 1,
+          workoutId: "workout_1",
+          workoutVersionId: "workout_pub_1_v123",
+          preferredMinuteOfDay: null,
+          reminderEnabled: false,
+          notes: ""
+        }]
+      }]
+    };
      const pub = await publicationRepository.publish('human_1', 'plan', planPayload.planId, planPayload, ['PLAN']);
      await syncManager.syncPending();
      
@@ -110,7 +153,15 @@ describe('Emulator Acceptance', () => {
   
   it('Publication: Cross-owner writes are denied', async () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
-    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', { title: 'hacked' } as any, []);
+    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', {
+      schemaVersion: "1",
+      workoutId: "workout_hack",
+      title: "hacked",
+      discipline: "STRENGTH" as "STRENGTH",
+      catalogueReleaseId: "v1",
+      tags: [],
+      blocks: []
+    }, []);
     await syncManager.syncPending();
     const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId));
     expect(remote.exists()).toBe(false);
@@ -152,11 +203,11 @@ describe('Emulator Acceptance', () => {
     console.log("Current Auth UID:", auth.currentUser?.uid);
     
     // Create
-    await draftRepo.saveWorkoutDraft('human_1', {
+    await draftRepo.saveWorkoutDraft('human_1', <import("../../domain/types").Workout>{
       schemaVersion: "1",
       workoutId: "workout_1",
       title: "My Workout",
-      discipline: "STRENGTH" as const,
+      discipline: "STRENGTH" as "STRENGTH",
       catalogueReleaseId: "v1",
       tags: [],
       blocks: []
@@ -178,11 +229,11 @@ describe('Emulator Acceptance', () => {
     await adminDb.collection('users').doc('human_1').collection('workoutDrafts').doc('workout_1').update({ revision: 10 });
     
     // Local save again
-    await draftRepo.saveWorkoutDraft('human_1', {
+    await draftRepo.saveWorkoutDraft('human_1', <import("../../domain/types").Workout>{
       schemaVersion: "1",
       workoutId: "workout_1",
       title: "My Local Conflict",
-      discipline: "STRENGTH" as const,
+      discipline: "STRENGTH" as "STRENGTH",
       catalogueReleaseId: "v1",
       tags: [],
       blocks: []
@@ -208,11 +259,11 @@ describe('Emulator Acceptance', () => {
     await clear(); // Client A's fresh device
     
     // Offline creation
-    await draftRepo.saveWorkoutDraft('human_1', {
+    await draftRepo.saveWorkoutDraft('human_1', <import("../../domain/types").Workout>{
       schemaVersion: "1",
       workoutId: "workout_shared_1",
       title: "Base Workout",
-      discipline: "STRENGTH" as const,
+      discipline: "STRENGTH" as "STRENGTH",
       catalogueReleaseId: "v1",
       tags: [],
       blocks: []
@@ -241,7 +292,7 @@ describe('Emulator Acceptance', () => {
     expect(sharedDraftB?.title).toBe("Base Workout");
     
     // Client B edits offline
-    await draftRepo.saveWorkoutDraft('human_1', {
+    await draftRepo.saveWorkoutDraft('human_1', <import("../../domain/types").Workout>{
       ...sharedDraftB!,
       title: "Client B Edit"
     });
@@ -259,7 +310,7 @@ describe('Emulator Acceptance', () => {
       schemaVersion: "1",
       workoutId: "workout_shared_1",
       title: "Client A Edit",
-      discipline: "STRENGTH" as const,
+      discipline: "STRENGTH" as "STRENGTH",
       catalogueReleaseId: "v1",
       tags: [],
       blocks: []
