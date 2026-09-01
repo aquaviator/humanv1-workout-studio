@@ -13,7 +13,7 @@ const parseHost = (name: keyof ImportMetaEnv, fallback: string): string => {
   if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error(`${name} must use a loopback host in emulator mode`);
   return value;
 };
-const emulatorProject = 'demo-hv1-workout-studio';
+const emulatorProject = 'demo-humanv1-workout-studio';
 const projectId = useEmulator ? (raw.VITE_FIREBASE_PROJECT_ID || emulatorProject) : required('VITE_FIREBASE_PROJECT_ID');
 if (useEmulator && projectId !== emulatorProject) throw new Error(`Emulator mode requires project ${emulatorProject}`);
 

@@ -12,7 +12,7 @@ const draft = (humanUserId: string, globalId: string, revision: number) => ({
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
-    projectId: 'demo-hv1-workout-studio',
+    projectId: 'demo-humanv1-workout-studio',
     firestore: {
       rules: readFileSync(resolve(__dirname, '../../../firestore.rules'), 'utf8'),
       host: '127.0.0.1',
