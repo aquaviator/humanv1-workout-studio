@@ -43,7 +43,7 @@ export class FirebaseAuthRepository implements AuthRepository {
         displayName: human.displayName || user.displayName || 'Human',
       };
     } catch (e) {
-      console.error('resolveIdentity error', e);
+      console.warn('resolveIdentity error', e.message);
       return null;
     }
   }

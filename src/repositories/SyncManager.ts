@@ -130,7 +130,7 @@ export class SyncManager {
       delete record.lastError;
       await set(key, record);
     } catch (e: any) {
-      console.error("Sync upload failed", e);
+      console.warn("Sync upload failed", e.message);
       if (e.message === 'REVISION_CONFLICT' || e.message === 'OWNERSHIP_CONFLICT' || e.message === 'REVISION_COLLISION') {
         record.status = 'CONFLICT';
         record.lastError = e.message;
