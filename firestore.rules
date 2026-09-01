@@ -1,95 +1,213 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function accountPath() { return /databases/$(database)/documents/accounts/$(request.auth.uid); }
-    function humanPath(humanUserId) { return /databases/$(database)/documents/users/$(humanUserId); }
-    function owns(humanUserId) {
-      return signedIn() && exists(accountPath())
-        && get(accountPath()).data.humanUserId == humanUserId
-        && get(accountPath()).data.status == 'ACTIVE' && get(accountPath()).data.schemaVersion == 1
-        && exists(humanPath(humanUserId))
-        && get(humanPath(humanUserId)).data.ownerFirebaseUid == request.auth.uid
-        && get(humanPath(humanUserId)).data.status == 'ACTIVE' && get(humanPath(humanUserId)).data.schemaVersion == 1;
+    function isAuthenticated() { return request.auth != null; }
+    function accountBinding() {
+      return get(/databases/$(database)/documents/accounts/$(request.auth.uid));
     }
-    function releaseIsReadable(releaseId) {
-      let release = get(/databases/$(database)/documents/exercise_catalogue_releases/$(releaseId));
-      return release.data.status == 'published' && release.data.channel == 'production' && release.data.validationStatus == 'validated';
+    function ownsHumanRoot(humanUserId) {
+      let root = get(/databases/$(database)/documents/users/$(humanUserId));
+      return isAuthenticated()
+        && accountBinding().data.status == "ACTIVE"
+        && accountBinding().data.schemaVersion == 1
+        && accountBinding().data.humanUserId == humanUserId
+        && root.data.status == "ACTIVE"
+        && root.data.schemaVersion == 1
+        && root.data.ownerFirebaseUid == request.auth.uid;
+    }
+    function createsOwnedPlannerRecord(humanUserId) {
+      return request.resource.data.humanUserId == humanUserId;
+    }
+    function updatesOwnedPlannerRecord(humanUserId) {
+      return resource.data.humanUserId == humanUserId
+        && request.resource.data.humanUserId == humanUserId;
+    }
+    function createsOwnedMeasurementRecord(humanUserId, documentId) {
+      return request.resource.data.humanUserId == humanUserId
+        && request.resource.data.schemaVersion == 14
+        && request.resource.data.globalId == documentId
+        && request.resource.data.loggedSetGlobalId is string
+        && request.resource.data.metricKey is string
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1;
+    }
+    function updatesOwnedMeasurementRecord(humanUserId, documentId) {
+      return resource.data.humanUserId == humanUserId
+        && resource.data.globalId == request.resource.data.globalId
+        && resource.data.loggedSetGlobalId == request.resource.data.loggedSetGlobalId
+        && createsOwnedMeasurementRecord(humanUserId, documentId)
+        && request.resource.data.revision >= resource.data.revision;
+    }
+    function validStudioDraft(humanUserId, documentId) {
+      return request.resource.data.keys().hasAll([
+          "schemaVersion", "globalId", "humanUserId", "revision", "status",
+          "payload", "createdAt", "updatedAt", "deletedAt", "originClientId"
+        ])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.globalId == documentId
+        && request.resource.data.humanUserId == humanUserId
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1
+        && request.resource.data.status == "DRAFT"
+        && request.resource.data.payload is map
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string
+        && (request.resource.data.deletedAt == null || request.resource.data.deletedAt is string)
+        && request.resource.data.originClientId is string;
+    }
+    function createsStudioDraft(humanUserId, documentId) {
+      return ownsHumanRoot(humanUserId) && validStudioDraft(humanUserId, documentId);
+    }
+    function updatesStudioDraft(humanUserId, documentId) {
+      return ownsHumanRoot(humanUserId)
+        && validStudioDraft(humanUserId, documentId)
+        && resource.data.humanUserId == humanUserId
+        && request.resource.data.humanUserId == resource.data.humanUserId
+        && request.resource.data.globalId == resource.data.globalId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.revision > resource.data.revision;
+    }
+    function validPublicationState(data) {
+      return (data.publicationState == "PUBLISHED" && data.tombstoneState == "ACTIVE")
+        || (data.publicationState == "TOMBSTONED" && data.tombstoneState == "SOFT_DELETED");
+    }
+    function validPublishedVersion(humanUserId, versionId, contentType) {
+      return request.resource.data.keys().hasAll([
+          "schemaVersion", "globalId", "humanUserId", "revision",
+          "publicationState", "tombstoneState", "sourceDraftId", "payload",
+          "createdAt", "updatedAt", "publishedAt", "contentChecksum",
+          "versionId", "contentType", "compatibleTags"
+        ])
+        && request.resource.data.schemaVersion is string
+        && request.resource.data.schemaVersion != ""
+        && request.resource.data.globalId is string
+        && request.resource.data.globalId != ""
+        && request.resource.data.humanUserId == humanUserId
+        && request.resource.data.sourceDraftId == request.resource.data.globalId
+        && request.resource.data.versionId == versionId
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1
+        && validPublicationState(request.resource.data)
+        && request.resource.data.payload is map
+        && request.resource.data.contentChecksum is string
+        && request.resource.data.contentChecksum.matches("^[0-9a-f]{64}$")
+        && request.resource.data.compatibleTags is list
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string
+        && request.resource.data.publishedAt is string
+        && request.resource.data.contentType == contentType;
+    }
+    function validPublishedPlan(humanUserId, versionId) {
+      return validPublishedVersion(humanUserId, versionId, "plan")
+        && request.resource.data.payload.weeks is list;
     }
 
-    match /accounts/{firebaseUid} {
-      allow read: if signedIn() && request.auth.uid == firebaseUid;
-      allow write: if false;
-      match /entitlements/{documentId} {
-        allow read: if signedIn() && request.auth.uid == firebaseUid && documentId == 'current';
-        allow write: if false;
+    match /accounts/{uid} {
+      allow get: if isAuthenticated() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+      match /entitlements/{document=**} { allow read, write: if false; }
+    }
+
+    match /users/{humanUserId} {
+      // HIIT uses this single-document read as its trusted-identity sync gate.
+      // Listing Human roots and all client root mutations remain forbidden.
+      allow get: if ownsHumanRoot(humanUserId);
+      allow list, create, update, delete: if false;
+      match /profile/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /weight/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /tape/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /customExercises/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /templates/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /templateExercises/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /templateSets/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /sessions/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /loggedSets/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      // V37 records are additive. Older clients ignore this collection and
+      // continue syncing legacy loggedSets without losing completion state.
+      match /measurementRecords/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow delete: if false;
+        allow create: if ownsHumanRoot(humanUserId) && createsOwnedMeasurementRecord(humanUserId, document);
+        allow update: if ownsHumanRoot(humanUserId) && updatesOwnedMeasurementRecord(humanUserId, document);
+      }
+      // Workout Studio drafts remain owner-scoped, revision-monotonic and
+      // soft-delete only. They do not confer platform authority.
+      match /workoutDrafts/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if createsStudioDraft(humanUserId, document);
+        allow update: if updatesStudioDraft(humanUserId, document);
+        allow delete: if false;
+      }
+      match /planDrafts/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if createsStudioDraft(humanUserId, document);
+        allow update: if updatesStudioDraft(humanUserId, document);
+        allow delete: if false;
+      }
+      match /protocolDrafts/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if createsStudioDraft(humanUserId, document);
+        allow update: if updatesStudioDraft(humanUserId, document);
+        allow delete: if false;
+      }
+      // Published versions are append-only immutable records. Plans carry
+      // exact workoutVersionId references inside their typed weeks payload;
+      // application validation proves every placement has that version key.
+      match /publishedWorkouts/{versionId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId)
+          && validPublishedVersion(humanUserId, versionId, "workout");
+        allow update, delete: if false;
+      }
+      match /publishedPlans/{versionId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId)
+          && validPublishedPlan(humanUserId, versionId);
+        allow update, delete: if false;
+      }
+      match /publishedProtocols/{versionId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId)
+          && validPublishedVersion(humanUserId, versionId, "protocol");
+        allow update, delete: if false;
+      }
+      match /processedCommands/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /trainingPlans/{document} {
+        allow read, delete: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId) && createsOwnedPlannerRecord(humanUserId);
+        allow update: if ownsHumanRoot(humanUserId) && updatesOwnedPlannerRecord(humanUserId);
+      }
+      match /plannedWorkouts/{document} {
+        allow read, delete: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId) && createsOwnedPlannerRecord(humanUserId);
+        allow update: if ownsHumanRoot(humanUserId) && updatesOwnedPlannerRecord(humanUserId);
       }
     }
-    match /exercise_catalogue/current { allow read: if signedIn(); allow write: if false; }
+
+    // The governed catalogue is global, non-user data. Published production
+    // releases are publicly readable so bundled-first refresh also works before
+    // sign-in; all client writes and all unpublished content remain denied.
+    match /exercise_catalogue/{documentId} {
+      allow read: if resource.data.status == "published"
+        && resource.data.channel == "production";
+      allow create, update, delete: if false;
+    }
     match /exercise_catalogue_releases/{releaseId} {
-      allow read: if signedIn() && resource.data.status == 'published' && resource.data.channel == 'production' && resource.data.validationStatus == 'validated';
-      allow write: if false;
-      match /exercises/{exerciseId} { allow read: if signedIn() && releaseIsReadable(releaseId); allow write: if false; }
+      allow read: if resource.data.status == "published"
+        && resource.data.channel == "production";
+      allow create, update, delete: if false;
+      match /exercises/{exerciseId} {
+        allow read: if get(/databases/$(database)/documents/exercise_catalogue_releases/$(releaseId)).data.status == "published"
+          && get(/databases/$(database)/documents/exercise_catalogue_releases/$(releaseId)).data.channel == "production";
+        allow create, update, delete: if false;
+      }
     }
     match /staging_exercises/{document=**} { allow read, write: if false; }
 
-    match /users/{humanUserId} {
-      allow read: if owns(humanUserId);
-      allow write: if false;
-      function validDraft(data, itemId) {
-        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'status', 'payload', 'createdAt', 'updatedAt', 'deletedAt', 'originClientId'])
-          && data.schemaVersion == 1 && data.globalId == itemId && data.humanUserId == humanUserId
-          && data.revision is int && data.revision >= 1 && data.status == 'DRAFT' && data.payload is map
-          && data.createdAt is string && data.updatedAt is string
-          && (data.deletedAt == null || data.deletedAt is string) && data.originClientId is string;
-      }
-      function validCreate(itemId) { return owns(humanUserId) && validDraft(request.resource.data, itemId); }
-      function validUpdate(itemId) {
-        return owns(humanUserId) && validDraft(request.resource.data, itemId)
-          && request.resource.data.humanUserId == resource.data.humanUserId
-          && request.resource.data.globalId == resource.data.globalId
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.revision > resource.data.revision;
-      }
-      match /workoutDrafts/{itemId} {
-        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
-      }
-      match /planDrafts/{itemId} {
-        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
-      }
-      match /protocolDrafts/{itemId} {
-        allow read: if owns(humanUserId); allow create: if validCreate(itemId); allow update: if validUpdate(itemId); allow delete: if false;
-      }
-      function validPublished(data, itemId, contentType) {
-        return data.keys().hasAll(['schemaVersion', 'globalId', 'humanUserId', 'revision', 'publicationState', 'tombstoneState', 'sourceDraftId', 'payload', 'createdAt', 'updatedAt', 'publishedAt', 'contentChecksum', 'versionId', 'contentType', 'compatibleTags'])
-          && data.schemaVersion is string && data.schemaVersion != '' && data.humanUserId == humanUserId
-          && data.globalId is string && data.globalId != '' && data.sourceDraftId == data.globalId
-          && data.versionId == itemId && data.revision is int && data.revision >= 1
-          && data.publicationState in ['PUBLISHED', 'TOMBSTONED'] && data.tombstoneState in ['ACTIVE', 'SOFT_DELETED']
-          && data.payload is map && data.contentChecksum is string && data.contentChecksum.size() == 64
-          && data.compatibleTags is list
-          && data.createdAt is string && data.updatedAt is string && data.publishedAt is string
-          && data.contentType == contentType;
-      }
-      match /publishedWorkouts/{itemId} {
-        allow read: if owns(humanUserId);
-        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'workout');
-        allow update, delete: if false;
-      }
-      match /publishedPlans/{itemId} {
-        allow read: if owns(humanUserId);
-        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'plan');
-        allow update, delete: if false;
-      }
-      match /publishedProtocols/{itemId} {
-        allow read: if owns(humanUserId);
-        allow create: if owns(humanUserId) && validPublished(request.resource.data, itemId, 'protocol');
-        allow update, delete: if false;
-      }
-      match /{immutableCollection}/{itemId} {
-        allow read: if owns(humanUserId) && immutableCollection in ['workouts', 'workoutVersions', 'plans', 'planVersions', 'protocols', 'protocolVersions', 'studioCommands', 'studioProcessedCommands'];
-        allow write: if false;
-      }
-    }
+    match /legacyIdentityEvidence/{document=**} { allow read, write: if false; }
+    match /entitlements/{document=**} { allow read, write: if false; }
+    match /trialPolicies/{document=**} { allow read, write: if false; }
+    match /platform_config/{document=**} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
   }
 }

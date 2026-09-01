@@ -11,7 +11,7 @@ const draft = (humanUserId: string, globalId: string, revision: number) => ({
 });
 const published = (humanUserId: string, globalId: string, contentType: 'workout' | 'plan' | 'protocol') => ({
   schemaVersion: `humanv1.${contentType}/1`, globalId, humanUserId, revision: 1, publicationState: 'PUBLISHED', tombstoneState: 'ACTIVE',
-  sourceDraftId: globalId, payload: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  sourceDraftId: globalId, payload: contentType === 'plan' ? { weeks: [{ placements: [{ workoutVersionId: 'workout-1_r1_aaaaaaaaaaaa' }] }] } : {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   publishedAt: '2026-01-01T00:00:00.000Z', contentChecksum: 'a'.repeat(64), versionId: `${globalId}_v1`, contentType, compatibleTags: [],
 });
 
@@ -44,7 +44,7 @@ beforeEach(async () => {
     await setDoc(doc(adminDb, 'users', 'human_2'), { ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1 });
     
     // Seed catalogue
-    await setDoc(doc(adminDb, 'exercise_catalogue', 'current'), { releaseId: 'v1' });
+    await setDoc(doc(adminDb, 'exercise_catalogue', 'current'), { releaseId: 'v1', status: 'published', channel: 'production' });
     await setDoc(doc(adminDb, 'exercise_catalogue_releases', 'v1'), { status: 'published', channel: 'production', validationStatus: 'validated' });
   });
 });
@@ -81,6 +81,8 @@ describe('Firestore Security Rules', () => {
     await assertFails(setDoc(doc(base, 'bad-type'), { ...valid, versionId: 'bad-type', contentType: 'plan' }));
     await assertFails(setDoc(doc(base, 'bad-revision'), { ...valid, versionId: 'bad-revision', revision: 0 }));
     await assertFails(setDoc(doc(base, 'bad-checksum'), { ...valid, versionId: 'bad-checksum', contentChecksum: 'short' }));
+    await assertFails(setDoc(doc(base, 'bad-checksum-alphabet'), { ...valid, versionId: 'bad-checksum-alphabet', contentChecksum: 'z'.repeat(64) }));
+    await assertFails(setDoc(doc(base, 'bad-state-pair'), { ...valid, versionId: 'bad-state-pair', publicationState: 'PUBLISHED', tombstoneState: 'SOFT_DELETED' }));
   });
   
   // 1. Identity mapping is client read-only.

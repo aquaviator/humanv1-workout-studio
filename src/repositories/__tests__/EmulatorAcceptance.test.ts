@@ -40,7 +40,7 @@ beforeAll(async () => {
   const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], category: '', aliases: [], metricProfile: { primary: ['repetitions'], secondary: [], optional: [], unsupported: [] } };
   const computedChecksum = catalogueChecksum([mockExercise]);
   
-  await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1' });
+  await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1', status: 'published', channel: 'production' });
   await adminDb.collection('exercise_catalogue_releases').doc('v1').set({ releaseId: 'v1', schemaVersion: 1, status: 'published', validationStatus: 'validated', channel: 'production', exerciseCount: 1, contentSha256: computedChecksum, catalogueVersion: 'test-v1' });
   await adminDb.collection('exercise_catalogue_releases').doc('v1').collection('exercises').doc('ex1').set(mockExercise);
 });
@@ -185,12 +185,12 @@ describe('Emulator Acceptance', () => {
   });
 
   it('Entitlement checking without false expiry', async () => {
-    // Should default to CHECKING then move to EXPIRED or ACTIVE
+    // Browser clients have no entitlement authority in the governed contract.
+    // A denied/missing verification must fail closed, never invent EXPIRED.
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     const entRepo = new FirebaseEntitlementRepository();
-    // human_1 has no document, should be EXPIRED
     const entitlement = await entRepo.getEntitlement('human_1');
-    expect(entitlement.state).toBe('EXPIRED');
+    expect(entitlement.state).toBe('VERIFICATION_UNAVAILABLE');
   });
 
   it('Workout round trip, Conflict isolation, Offline creation', async () => {
