@@ -49,12 +49,21 @@ export class FirebaseAuthRepository implements AuthRepository {
   }
 
   async signIn(): Promise<void> {
+    let user: User;
     if (env.useEmulator) {
-      await signInWithEmailAndPassword(auth, env.emulator.authEmail, env.emulator.authPassword);
+      user = (await signInWithEmailAndPassword(auth, env.emulator.authEmail, env.emulator.authPassword)).user;
     } else {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      user = (await signInWithPopup(auth, provider)).user;
     }
+
+    const identity = await this.resolveIdentity(user);
+    if (!identity) {
+      await firebaseSignOut(auth);
+      throw new Error('Google sign-in succeeded, but this account has not been provisioned with a trusted HumanV1 identity.');
+    }
+    this.currentIdentity = identity;
+    this.notifyListeners();
   }
 
   async signOut(): Promise<void> {
