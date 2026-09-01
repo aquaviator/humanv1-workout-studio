@@ -7,6 +7,7 @@ import { FirebaseCatalogueRepository } from '../FirebaseCatalogueRepository';
 import { FirebaseEntitlementRepository } from '../FirebaseEntitlementRepository';
 import { DraftRepository } from '../DraftRepository';
 import { syncManager } from '../SyncManager';
+import { publicationRepository } from '../PublicationRepository';
 import { auth, db } from '../../config/firebase';
 import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -41,6 +42,99 @@ beforeEach(async () => {
 });
 
 describe('Emulator Acceptance', () => {
+  it('Publication: unchanged republish idempotence and edited republish creates one new version', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+    await clear();
+    
+    const workoutPayload = {
+      schemaVersion: 1,
+      workoutId: "workout_pub_1",
+      title: "My Pub Workout",
+      discipline: "STRENGTH" as const,
+      catalogueReleaseId: "v1",
+      tags: [],
+      blocks: []
+    };
+    
+    // Publish
+    const pub1 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
+    await syncManager.syncPending();
+    
+    // Read from remote
+    const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub1.versionId));
+    expect(remote.exists()).toBe(true);
+    expect(remote.data()?.payload.title).toBe("My Pub Workout");
+    
+    // Publish same unchanged
+    const pub2 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
+    expect(pub2.versionId).toBe(pub1.versionId); // Idempotent
+    
+    // Publish edited
+    workoutPayload.title = "My Edited Pub Workout";
+    const pub3 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
+    expect(pub3.versionId).not.toBe(pub1.versionId); // New version
+    expect(pub3.revision).toBe(2);
+    await syncManager.syncPending();
+    
+    const remote3 = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub3.versionId));
+    expect(remote3.data()?.payload.title).toBe("My Edited Pub Workout");
+    
+    // Check old version is immutable and remains
+    const remoteOld = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub1.versionId));
+    expect(remoteOld.data()?.payload.title).toBe("My Pub Workout");
+  });
+
+  it('Publication: Protocol compiled timeline round-trips', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+    
+    const protoPayload = {
+      protocolId: "proto_1",
+      title: "My Proto",
+      segments: [{ segmentId: "s1", repeatCount: 2, durationSeconds: 30, phase: "WORK" }]
+    };
+    const compiled = [
+      { segmentId: "s1", iteration: 0, phase: "WORK", durationSeconds: 30, startTime: 0 },
+      { segmentId: "s1", iteration: 1, phase: "WORK", durationSeconds: 30, startTime: 30 }
+    ];
+    
+    const pub = await publicationRepository.publish('human_1', 'protocol', protoPayload.protocolId, protoPayload, ['HIIT'], compiled);
+    await syncManager.syncPending();
+    
+    const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedProtocols', pub.versionId));
+    expect(remote.data()?.compiledTimeline.length).toBe(2);
+    expect(remote.data()?.compiledTimeline[1].startTime).toBe(30);
+  });
+  
+  it('Publication: Plan references exact published Workout versions', async () => {
+     // A Plan placement requires workoutVersionId
+     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+     const planPayload = {
+       planId: "plan_1",
+       weeks: [{
+         weekId: "w1",
+         placements: [{
+           placementId: "p1",
+           workoutId: "workout_pub_1",
+           workoutVersionId: "workout_pub_1_v123"
+         }]
+       }]
+     };
+     const pub = await publicationRepository.publish('human_1', 'plan', planPayload.planId, planPayload, ['PLAN']);
+     await syncManager.syncPending();
+     
+     const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', pub.versionId));
+     expect(remote.exists()).toBe(true);
+     expect(remote.data()?.payload.weeks[0].placements[0].workoutVersionId).toBe("workout_pub_1_v123");
+  });
+  
+  it('Publication: Cross-owner writes are denied', async () => {
+    await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
+    const pub = await publicationRepository.publish('human_1', 'workout', 'workout_hack', { title: 'hacked' }, []);
+    await syncManager.syncPending();
+    const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId));
+    expect(remote.exists()).toBe(false);
+  });
+
   it('Authentication and trusted identity gating', async () => {
     const authRepo = new FirebaseAuthRepository();
     // Simulate sign in

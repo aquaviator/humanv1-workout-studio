@@ -2,6 +2,8 @@ import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Protocol, ProtocolSegment } from "../../domain/types";
+import { publicationRepository } from "../../repositories/PublicationRepository";
+import { Send } from "lucide-react";
 import { Plus, Trash2, Undo2, Redo2, AlertCircle } from "lucide-react";
 import { useHistory } from "../../lib/useHistory";
 import { draftRepository } from "../../repositories/DraftRepository";
@@ -33,6 +35,8 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"builder" | "preview">("builder");
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [publishStatus, setPublishStatus] = useState<string>("");
 
   const validationErrors = useMemo(() => validateProtocol(protocol), [protocol]);
 
@@ -68,6 +72,32 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
     return () => clearTimeout(timeout);
   }, [protocol, identity.humanUserId, isLoading, validationErrors.length]);
 
+  const handlePublish = async () => {
+    try {
+      setPublishStatus("Publishing...");
+      
+      const compiledTimeline = [];
+      let time = 0;
+      for (const seg of protocol.segments) {
+        for (let i=0; i<seg.repeatCount; i++) {
+           compiledTimeline.push({
+             segmentId: seg.segmentId,
+             iteration: i,
+             phase: seg.phase,
+             durationSeconds: seg.durationSeconds,
+             startTime: time
+           });
+           time += seg.durationSeconds;
+        }
+      }
+
+      await publicationRepository.publish(identity.humanUserId, 'protocol', protocol.protocolId, protocol, protocol.suitability, compiledTimeline);
+      setPublishStatus("Queued—will send when connected");
+      setTimeout(() => { setIsPublishModalOpen(false); setPublishStatus(""); }, 2000);
+    } catch (e: any) {
+      setPublishStatus("Error: " + e.message);
+    }
+  };
   const addSegment = (phase: ProtocolSegment["phase"]) => {
     setProtocol({
       ...protocol,
@@ -130,12 +160,28 @@ export default function ProtocolBuilder({ identity }: { identity: HumanIdentity 
           <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
           </button>
-          <button className="bg-hv-surface-2 text-hv-text-muted px-4 py-2 rounded-md font-medium cursor-not-allowed" disabled>
-            Publish
+          <button onClick={() => setIsPublishModalOpen(true)} disabled={validationErrors.length > 0} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50">
+            <Send className="w-4 h-4" /> Send protocol to my apps
           </button>
         </div>
       </div>
-
+      {isPublishModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-hv-surface-1 p-6 rounded-xl max-w-md w-full shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 text-hv-text">Send protocol to my apps</h2>
+            <div className="space-y-3 mb-6 text-hv-text-muted">
+              <p><span className="font-semibold text-hv-text">Segments:</span> {protocol.segments.length}</p>
+              <p><span className="font-semibold text-hv-text">Total intervals:</span> {protocol.segments.reduce((acc, s) => acc + s.repeatCount, 0)}</p>
+              <p><span className="font-semibold text-hv-text">Compatible Destinations:</span> {protocol.suitability.join(', ') || 'None'}</p>
+            </div>
+            {publishStatus && <p className="mb-4 text-hv-primary">{publishStatus}</p>}
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
+              <button onClick={handlePublish} disabled={!!publishStatus} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="px-4 md:px-8 border-b border-hv-border flex gap-4 pt-4">
         <button 
           className={`pb-2 px-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'builder' ? 'border-hv-primary text-hv-primary' : 'border-transparent text-hv-text-muted hover:text-hv-text'}`}

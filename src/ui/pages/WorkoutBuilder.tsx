@@ -12,6 +12,8 @@ import { draftRepository } from "../../repositories/DraftRepository";
 import { HumanIdentity } from "../../domain/identity";
 import { validateWorkout } from "../../domain/validation/workoutValidation";
 import { AthletePreview } from "../components/AthletePreview";
+import { publicationRepository } from "../../repositories/PublicationRepository";
+import { Send } from "lucide-react";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
   const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
@@ -33,7 +35,9 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [exerciseTargetGroupId, setExerciseTargetGroupId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"builder" | "preview">("builder");
+  const [activeTab, setActiveTab] = useState<'builder' | 'preview'>('builder');
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [publishStatus, setPublishStatus] = useState('');
 
   const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);
 
@@ -70,6 +74,16 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     return () => clearTimeout(timeout);
   }, [workout, identity.humanUserId, isLoading, validationErrors.length]);
 
+  const handlePublish = async () => {
+    try {
+      setPublishStatus("Publishing...");
+      await publicationRepository.publish(identity.humanUserId, 'workout', workout.workoutId, workout, [workout.discipline]);
+      setPublishStatus("Queued—will send when connected");
+      setTimeout(() => { setIsPublishModalOpen(false); setPublishStatus(""); }, 2000);
+    } catch (e: any) {
+      setPublishStatus("Error: " + e.message);
+    }
+  };
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
 

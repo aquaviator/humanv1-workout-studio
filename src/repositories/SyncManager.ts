@@ -1,12 +1,14 @@
 import { get, set, keys, setMany } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
+import { PublishedEnvelope } from '../domain/publication';
 import { db } from '../config/firebase';
 import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
 
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
 
 export interface SyncRecord {
-  envelope: DraftEnvelope<any>;
+  syncType?: 'draft' | 'publication';
+  envelope: DraftEnvelope<any> | PublishedEnvelope<any>;
   status: SyncStatus;
   type: 'workout' | 'plan' | 'protocol';
   lastError?: string;
@@ -26,10 +28,11 @@ export class SyncManager {
     });
   }
 
-  async queueUpload(envelope: DraftEnvelope<any>, type: 'workout' | 'plan' | 'protocol'): Promise<void> {
-    const key = `sync_${envelope.humanUserId}_${type}_${envelope.globalId}`;
+  async queueUpload(envelope: DraftEnvelope<any> | PublishedEnvelope<any>, type: 'workout' | 'plan' | 'protocol', syncType: 'draft' | 'publication' = 'draft'): Promise<void> {
+    const key = syncType === 'publication' ? `sync_pub_${envelope.humanUserId}_${type}_${(envelope as PublishedEnvelope<any>).versionId}` : `sync_${envelope.humanUserId}_${type}_${envelope.globalId}`;
     const record: SyncRecord = {
       envelope,
+      syncType,
       status: 'PENDING',
       type
     };
@@ -96,13 +99,16 @@ export class SyncManager {
 
   private async uploadRecord(key: string, record: SyncRecord) {
     const { envelope, type } = record;
-    const docRef = doc(db, 'users', envelope.humanUserId, `${type}Drafts`, envelope.globalId);
+    const isPub = record.syncType === 'publication';
+    const collectionName = isPub ? `published${type.charAt(0).toUpperCase() + type.slice(1)}s` : `${type}Drafts`;
+    const docId = isPub ? (envelope as PublishedEnvelope<any>).versionId : envelope.globalId;
+    const docRef = doc(db, 'users', envelope.humanUserId, collectionName, docId);
 
     try {
       await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(docRef);
         if (snapshot.exists()) {
-          const remoteData = snapshot.data() as DraftEnvelope<any>;
+          const remoteData = snapshot.data() as DraftEnvelope<any> | PublishedEnvelope<any>;
           // Different owner check (defensive, backend rules should also enforce)
           if (remoteData.humanUserId !== envelope.humanUserId) {
             throw new Error("OWNERSHIP_CONFLICT");
@@ -145,6 +151,17 @@ export class SyncManager {
     }
     return records;
   }
-}
 
+  async listPublicationSyncRecords(humanUserId: string, type: 'workout' | 'plan' | 'protocol'): Promise<SyncRecord[]> {
+    const allKeys = await keys();
+    const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`sync_pub_${humanUserId}_${type}_`));
+    const records: SyncRecord[] = [];
+    for (const key of syncKeys) {
+      const record = await get<SyncRecord>(key as string);
+      if (record) records.push(record);
+    }
+    return records;
+  }
+}
 export const syncManager = new SyncManager();
+
