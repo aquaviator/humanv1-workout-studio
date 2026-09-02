@@ -42,7 +42,7 @@ beforeAll(async () => {
   });
   
   // Seed catalogue
-  const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], category: '', aliases: [], metricProfile: { primary: ['repetitions'], secondary: [], optional: [], unsupported: [] } };
+  const mockExercise = { schemaVersion: 1, exerciseId: 'ex1', displayName: 'Push Up', equipment: [], category: '', aliases: [], trackingCapabilities: ['repetitions'] };
   const computedChecksum = catalogueChecksum([mockExercise]);
   
   await adminDb.collection('exercise_catalogue').doc('current').set({ releaseId: 'v1', status: 'published', channel: 'production' });

@@ -30,23 +30,69 @@ export function catalogueChecksum(documents: Json[]): string {
   return sha256(canonicalJson(sorted));
 }
 
-function asExercise(value: Json): Exercise {
+const GOVERNED_CAPABILITIES = new Set([
+  'repetitions', 'load', 'duration', 'distance', 'bodyweight', 'assisted_load',
+  'weighted_bodyweight', 'rpe', 'tempo', 'pace', 'calories', 'rir', 'intervals', 'side',
+]);
+
+export function metricProfileFromCapabilities(value: Json | undefined): MetricProfile {
+  if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+    throw new Error('Exercise tracking capabilities are invalid');
+  }
+  const capabilities = new Set(value);
+  const unknown = value.filter(item => !GOVERNED_CAPABILITIES.has(item));
+  if (unknown.length) throw new Error(`Exercise has unsupported tracking capabilities: ${unknown.join(', ')}`);
+
+  const primary: string[] = [];
+  if (capabilities.has('repetitions')) primary.push('repetitions');
+  if (capabilities.has('duration')) primary.push('duration');
+  if (capabilities.has('distance')) primary.push('distance');
+  if (capabilities.has('load') || capabilities.has('weighted_bodyweight')) primary.push('external_load');
+  if (capabilities.has('assisted_load')) primary.push('assistance');
+
+  const secondary: string[] = [];
+  if (capabilities.has('rpe')) secondary.push('rpe');
+  if (capabilities.has('tempo')) secondary.push('tempo');
+  if (capabilities.has('rir')) secondary.push('rir');
+  if (capabilities.has('intervals')) secondary.push('intervals');
+  if (capabilities.has('side')) secondary.push('side');
+
+  return {
+    primary,
+    secondary,
+    optional: capabilities.has('calories') ? ['energy'] : [],
+    unsupported: [],
+  };
+}
+
+export function asExercise(value: Json, documentId: string): Exercise {
   if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Exercise is not an object');
-  if (typeof value.exerciseId !== 'string' || typeof value.name !== 'string') throw new Error('Exercise stable ID or name is missing');
+  if (value.schemaVersion !== 1 || typeof value.exerciseId !== 'string' || !value.exerciseId.trim() ||
+      value.exerciseId !== documentId || typeof value.displayName !== 'string' || !value.displayName.trim()) {
+    throw new Error('Exercise governed identity, schema version, or display name is invalid');
+  }
+  const environments = [value.homeSuitable === true ? 'home' : '', value.gymSuitable === true ? 'gym' : ''].filter(Boolean);
+  const modalities = [
+    typeof value.exerciseType === 'string' ? value.exerciseType : '',
+    value.cardioSuitable === true ? 'cardio' : '',
+    value.circuitSuitable === true ? 'circuit' : '',
+    value.recommendedForHiit === true ? 'hiit' : '',
+    value.recommendedForStrength === true ? 'strength' : '',
+  ].filter(Boolean);
   return {
     exerciseId: value.exerciseId,
-    name: value.name,
+    name: value.displayName,
     category: typeof value.category === 'string' ? value.category : '',
     equipment: Array.isArray(value.equipment) ? value.equipment.filter((v): v is string => typeof v === 'string') : [],
     aliases: Array.isArray(value.aliases) ? value.aliases.filter((v): v is string => typeof v === 'string') : [],
-    metricProfile: metricProfile(value.metricProfile),
+    metricProfile: metricProfileFromCapabilities(value.trackingCapabilities),
     primaryMuscles: strings(value.primaryMuscles),
     secondaryMuscles: strings(value.secondaryMuscles),
     muscleArea: strings(value.muscleArea),
-    movementPattern: strings(value.movementPattern),
-    environment: strings(value.environment),
+    movementPattern: strings(value.movementPatterns),
+    environment: environments,
     laterality: typeof value.laterality === 'string' ? value.laterality : undefined,
-    modalitySuitability: strings(value.modalitySuitability),
+    modalitySuitability: [...new Set(modalities)],
     technicalComplexity: typeof value.technicalComplexity === 'string' ? value.technicalComplexity : undefined,
     riskIndicators: strings(value.riskIndicators),
     specialistReview: typeof value.specialistReview === 'boolean' ? value.specialistReview : undefined,
@@ -54,16 +100,22 @@ function asExercise(value: Json): Exercise {
   };
 }
 
-function metricProfile(value: Json | undefined): MetricProfile {
-  if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Exercise metric profile is invalid');
-  const required = ['primary', 'secondary', 'optional', 'unsupported'] as const;
-  const result = required.map(key => value[key]);
-  if (!result.every(item => Array.isArray(item) && item.every(entry => typeof entry === 'string'))) throw new Error('Exercise metric profile is invalid');
-  return { primary: result[0] as string[], secondary: result[1] as string[], optional: result[2] as string[], unsupported: result[3] as string[] };
-}
-
 function strings(value: Json | undefined): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
+}
+
+export function parseCatalogueDocuments(documents: Array<{ id: string; data: Json }>): { raw: Json[]; exercises: Exercise[] } {
+  const raw: Json[] = [];
+  const exercises: Exercise[] = [];
+  const seen = new Set<string>();
+  for (const item of documents) {
+    const exercise = asExercise(item.data, item.id);
+    if (seen.has(exercise.exerciseId)) throw new Error('Duplicate exercise stable ID');
+    seen.add(exercise.exerciseId);
+    raw.push(item.data);
+    exercises.push(exercise);
+  }
+  return { raw, exercises: exercises.sort((a, b) => a.exerciseId.localeCompare(b.exerciseId)) };
 }
 
 export class FirebaseCatalogueRepository implements CatalogueRepository {
@@ -90,15 +142,8 @@ export class FirebaseCatalogueRepository implements CatalogueRepository {
         typeof metadata.catalogueVersion !== 'string') throw new Error('Catalogue release metadata is not governed');
 
     const snapshot = await getDocs(collection(db, 'exercise_catalogue_releases', releaseId, 'exercises'));
-    const raw: Json[] = [];
-    const seen = new Set<string>();
-    for (const item of snapshot.docs) {
-      const value = item.data() as Json;
-      const exercise = asExercise(value);
-      if (item.id !== exercise.exerciseId || seen.has(exercise.exerciseId)) throw new Error('Duplicate or mismatched exercise stable ID');
-      seen.add(exercise.exerciseId);
-      raw.push(value);
-    }
+    const parsed = parseCatalogueDocuments(snapshot.docs.map(item => ({ id: item.id, data: item.data() as Json })));
+    const raw = parsed.raw;
     if (raw.length !== metadata.exerciseCount) throw new Error('Catalogue exercise count mismatch');
     const checksum = catalogueChecksum(raw);
     if (checksum !== metadata.contentSha256.toLowerCase()) throw new Error('Catalogue checksum mismatch');
@@ -107,7 +152,7 @@ export class FirebaseCatalogueRepository implements CatalogueRepository {
       releaseId,
       catalogueVersion: metadata.catalogueVersion,
       contentSha256: checksum,
-      exercises: raw.map(asExercise).sort((a, b) => a.exerciseId.localeCompare(b.exerciseId)),
+      exercises: parsed.exercises,
     };
     await idb.set(IDB_CATALOGUE_ENVELOPE_KEY, envelope);
   }
