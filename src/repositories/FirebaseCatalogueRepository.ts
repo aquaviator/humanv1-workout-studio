@@ -119,6 +119,14 @@ export function parseCatalogueDocuments(documents: Array<{ id: string; data: Jso
 }
 
 export class FirebaseCatalogueRepository implements CatalogueRepository {
+  async getActiveReleaseId(): Promise<string> {
+    const local = await idb.get<CatalogueEnvelope>(IDB_CATALOGUE_ENVELOPE_KEY);
+    if (local?.releaseId) return local.releaseId;
+    await this.syncCatalogue();
+    const refreshed = await idb.get<CatalogueEnvelope>(IDB_CATALOGUE_ENVELOPE_KEY);
+    if (!refreshed?.releaseId) throw new Error('Catalogue release unavailable');
+    return refreshed.releaseId;
+  }
   async getExercises(): Promise<Exercise[]> {
     const local = await idb.get<CatalogueEnvelope>(IDB_CATALOGUE_ENVELOPE_KEY);
     if (local?.exercises?.length) return local.exercises;

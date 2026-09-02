@@ -17,11 +17,15 @@ import { AthletePreview } from "../components/AthletePreview";
 import { publicationRepository } from "../../repositories/PublicationRepository";
 import { Send } from "lucide-react";
 import { deliveryAcknowledgementRepository, DeliveryAcknowledgement } from "../../repositories/DeliveryAcknowledgementRepository";
+import { crossAppRepository, markCatalogueSource } from "../../repositories/CrossAppRepository";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
   const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
   const [exercisesData, setExercisesData] = React.useState<Exercise[]>([]);
-  React.useEffect(() => { catalogueRepository.getExercises().then(setExercisesData); }, []);
+  React.useEffect(() => {
+    catalogueRepository.getExercises().then(catalogue => setExercisesData(catalogue.map(markCatalogueSource)));
+    crossAppRepository.listPrivateExercises(identity.humanUserId, false).then(privateItems => setExercisesData(current => [...current.filter(item => item.source !== "PRIVATE"), ...privateItems])).catch(() => undefined);
+  }, [identity.humanUserId]);
   const [workoutId] = useState(() => routeWorkoutId || uuidv4());
 
   const { state: workout, set: setWorkout, reset, undo, redo, canUndo, canRedo } = useHistory<Workout>({
@@ -29,12 +33,13 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     workoutId,
     title: "New Workout",
     discipline: "STRENGTH",
-    catalogueReleaseId: "fixture_catalogue_v1",
+    catalogueReleaseId: "catalogue_release_pending",
     tags: [],
     blocks: [],
   });
 
   const [isExerciseDrawerOpen, setIsExerciseDrawerOpen] = useState(false);
+  const [isCreateExerciseOpen, setIsCreateExerciseOpen] = useState(false);
   const [exerciseTargetGroupId, setExerciseTargetGroupId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +47,12 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
   const [delivery, setDelivery] = useState<DeliveryAcknowledgement | null>(null);
+
+  useEffect(() => {
+    if (routeWorkoutId || workout.catalogueReleaseId !== "catalogue_release_pending") return;
+    const release = catalogueRepository.getActiveReleaseId?.();
+    if (release) void release.then(releaseId => setWorkout({ ...workout, catalogueReleaseId: releaseId }));
+  }, [routeWorkoutId, setWorkout, workout]);
   
   useEffect(() => {
     if (!workout.workoutId) return;
@@ -84,11 +95,10 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   useEffect(() => {
     let mounted = true;
     if (routeWorkoutId) {
-      draftRepository.getWorkoutDraft(identity.humanUserId, routeWorkoutId).then((draft) => {
+      draftRepository.getWorkoutDraft(identity.humanUserId, routeWorkoutId).then(async (draft) => {
         if (!mounted) return;
-        if (draft) {
-          reset(draft);
-        }
+        const appWorkout = draft ? null : (await crossAppRepository.listAppWorkouts(identity.humanUserId).catch(() => [])).find(item => item.workoutId === routeWorkoutId);
+        if (draft || appWorkout) reset(draft || appWorkout!);
         setIsLoading(false);
       });
     } else {
@@ -107,6 +117,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
       draftRepository.saveWorkoutDraft(identity.humanUserId, workout).then(() => {
+        void crossAppRepository.saveAppWorkout(identity.humanUserId, workout).catch(() => undefined);
         setSaveStatus("Saved");
       });
     }, 1000);
@@ -184,6 +195,19 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const openExercisePicker = (groupId: string | null = null) => {
     setExerciseTargetGroupId(groupId);
     setIsExerciseDrawerOpen(true);
+  };
+
+  const createAndSelectExercise = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const metrics = String(form.get("metrics") || "").split(",").map(value => value.trim()).filter(Boolean);
+    const created = await crossAppRepository.savePrivateExercise(identity.humanUserId, {
+      name: String(form.get("name")), category: String(form.get("category")), equipment: [], aliases: [],
+      metricProfile: { primary: metrics, secondary: [], optional: [], unsupported: [] },
+    });
+    setExercisesData(items => [...items, created]);
+    setIsCreateExerciseOpen(false);
+    addExercise(created.exerciseId, created.name);
   };
 
   const removeGroupedExercise = (groupId: string, exerciseBlockId: string) => {
@@ -719,8 +743,10 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           exercises={exercisesData}
           onSelect={addExercise}
           onClose={() => { setExerciseTargetGroupId(null); setIsExerciseDrawerOpen(false); }}
+          onCreate={() => setIsCreateExerciseOpen(true)}
         />
       )}
+      {isCreateExerciseOpen && <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"><form onSubmit={createAndSelectExercise} className="bg-hv-surface-1 border border-hv-border rounded-xl p-6 w-full max-w-md space-y-4"><h2 className="font-bold text-xl">Create your exercise</h2><p className="text-sm text-hv-text-muted">Private to your account. Your unsaved workout stays open.</p><input name="name" required placeholder="Exercise name" className="w-full p-2 bg-hv-bg border border-hv-border rounded"/><input name="category" required placeholder="Movement / category" className="w-full p-2 bg-hv-bg border border-hv-border rounded"/><input name="metrics" required placeholder="Metrics, e.g. duration,distance" className="w-full p-2 bg-hv-bg border border-hv-border rounded"/><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsCreateExerciseOpen(false)}>Cancel</button><button className="bg-hv-primary text-white px-4 py-2 rounded">Save and select</button></div></form></div>}
     </div>
   );
 }

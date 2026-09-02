@@ -6,6 +6,7 @@ import { Workout } from '../domain/types';
 import { DeliveryAcknowledgement, deliveryAcknowledgementRepository } from './DeliveryAcknowledgementRepository';
 import { DraftEnvelope, draftRepository } from './DraftRepository';
 import { SyncRecord, syncManager } from './SyncManager';
+import { crossAppRepository } from './CrossAppRepository';
 
 export type WorkoutLibraryState = 'DRAFT' | 'QUEUED' | 'SENT' | 'DOWNLOADED' | 'CONFLICT' | 'RETRY_REQUIRED';
 
@@ -89,7 +90,8 @@ export class WorkoutLibraryRepository {
     const acknowledgements = cache?.acknowledgements ?? [];
     const syncByWorkout = new Map<string, SyncRecord>();
     syncRecords.forEach(record => syncByWorkout.set(record.envelope.globalId, record));
-    const ids = new Set([...drafts.map(draft => draft.globalId), ...publications.map(version => version.globalId)]);
+    const appWorkouts = offline ? [] : await crossAppRepository.listAppWorkouts(humanUserId).catch(() => []);
+    const ids = new Set([...drafts.map(draft => draft.globalId), ...publications.map(version => version.globalId), ...appWorkouts.map(workout => workout.workoutId)]);
 
     const items = [...ids].map(globalId => {
       const draft = drafts.find(candidate => candidate.globalId === globalId) ?? null;
@@ -108,7 +110,7 @@ export class WorkoutLibraryRepository {
       else if (acknowledgement?.state === 'CONFLICT' || acknowledgement?.state === 'REJECTED') state = 'CONFLICT';
       return {
         globalId,
-        workout: draft?.payload ?? latestVersion!.payload,
+        workout: draft?.payload ?? latestVersion?.payload ?? appWorkouts.find(workout => workout.workoutId === globalId)!,
         draft,
         versions,
         latestVersion,

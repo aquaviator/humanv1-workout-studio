@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router";
-import { LayoutDashboard, Dumbbell, CalendarRange, Library, Settings, LogIn, Activity, LogOut } from "lucide-react";
+import { LayoutDashboard, Dumbbell, CalendarRange, Library, Settings, LogIn, Activity, UserRound } from "lucide-react";
 import { cn } from "./lib/utils";
 import React, { useState, useEffect, Suspense } from "react";
 import { authRepository } from "./repositories/AuthManager";
@@ -19,6 +19,7 @@ const ExerciseLibrary = React.lazy(() => import("./ui/pages/ExerciseLibrary"));
 const ProtocolLibrary = React.lazy(() => import("./ui/pages/ProtocolLibrary"));
 const AccountSettings = React.lazy(() => import("./ui/pages/AccountSettings"));
 const ConflictCentre = React.lazy(() => import("./ui/pages/ConflictCentre"));
+const MyExercises = React.lazy(() => import("./ui/pages/MyExercises"));
 
 function Navigation() {
   const location = useLocation();
@@ -27,6 +28,7 @@ function Navigation() {
     { icon: Dumbbell, label: "Workouts", path: "/workouts" },
     { icon: CalendarRange, label: "Plans", path: "/plans" },
     { icon: Library, label: "Exercises", path: "/library/exercises" },
+    { icon: UserRound, label: "My Exercises", path: "/my-exercises" },
     { icon: Activity, label: "Protocols", path: "/library/protocols" },
     { icon: Activity, label: "Conflicts", path: "/conflicts" },
     { icon: Settings, label: "Account", path: "/account" },
@@ -124,7 +126,9 @@ export default function App() {
               <Route path="/workouts/:workoutId" element={<EntitlementGate entitlement={entitlement}><WorkoutBuilder identity={identity} /></EntitlementGate>} />
               <Route path="/plans" element={<EntitlementGate entitlement={entitlement}><PlansList identity={identity} /></EntitlementGate>} />
               <Route path="/plans/new" element={<EntitlementGate entitlement={entitlement}><PlanBuilder identity={identity} /></EntitlementGate>} />
+              <Route path="/plans/:planId" element={<EntitlementGate entitlement={entitlement}><PlanBuilder identity={identity} /></EntitlementGate>} />
               <Route path="/library/exercises" element={<EntitlementGate entitlement={entitlement}><ExerciseLibrary /></EntitlementGate>} />
+              <Route path="/my-exercises" element={<EntitlementGate entitlement={entitlement}><MyExercises identity={identity} /></EntitlementGate>} />
               <Route path="/library/protocols" element={<EntitlementGate entitlement={entitlement}><ProtocolLibrary identity={identity} /></EntitlementGate>} />
               <Route path="/protocols/new" element={<EntitlementGate entitlement={entitlement}><ProtocolBuilder identity={identity} /></EntitlementGate>} />
               <Route path="/conflicts" element={<EntitlementGate entitlement={entitlement}><ConflictCentre identity={identity} /></EntitlementGate>} />

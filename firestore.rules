@@ -115,6 +115,52 @@ service cloud.firestore {
       return validPublishedVersion(humanUserId, versionId, "plan")
         && request.resource.data.payload.weeks is list;
     }
+    function createsOwnedVersionedRecord(humanUserId, documentId) {
+      return ownsHumanRoot(humanUserId)
+        && request.resource.data.humanUserId == humanUserId
+        && request.resource.data.globalId == documentId
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is int
+        && (request.resource.data.deletedAt == null || request.resource.data.deletedAt is int)
+        && request.resource.data.originDeviceId is string;
+    }
+    function updatesOwnedVersionedRecord(humanUserId, documentId) {
+      return createsOwnedVersionedRecord(humanUserId, documentId)
+        && resource.data.humanUserId == humanUserId
+        && resource.data.globalId == documentId
+        && request.resource.data.humanUserId == resource.data.humanUserId
+        && request.resource.data.globalId == resource.data.globalId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.revision > resource.data.revision;
+    }
+    function validPrivateExercise(humanUserId, documentId) {
+      return createsOwnedVersionedRecord(humanUserId, documentId)
+        && documentId.matches('^(private|custom)_[A-Za-z0-9_-]{8,}$')
+        && request.resource.data.id == documentId
+        && request.resource.data.isCustom == true
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.category is string;
+    }
+    function validTemplate(humanUserId, documentId) {
+      return createsOwnedVersionedRecord(humanUserId, documentId)
+        && request.resource.data.name is string
+        && request.resource.data.exerciseIdsJson is string;
+    }
+    function validTemplateExercise(humanUserId, documentId) {
+      return createsOwnedVersionedRecord(humanUserId, documentId)
+        && request.resource.data.templateGlobalId is string
+        && request.resource.data.exerciseId is string
+        && request.resource.data.position is int;
+    }
+    function validTemplateSet(humanUserId, documentId) {
+      return createsOwnedVersionedRecord(humanUserId, documentId)
+        && request.resource.data.templateExerciseGlobalId is string
+        && request.resource.data.position is int
+        && request.resource.data.setType is string;
+    }
     function validWorkoutDeliveryAck(humanUserId, acknowledgementId) {
       let publication = get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(request.resource.data.versionId));
       return request.resource.data.keys().hasOnly([
@@ -161,10 +207,30 @@ service cloud.firestore {
       match /profile/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       match /weight/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       match /tape/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
-      match /customExercises/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
-      match /templates/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
-      match /templateExercises/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
-      match /templateSets/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
+      match /customExercises/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if validPrivateExercise(humanUserId, document);
+        allow update: if validPrivateExercise(humanUserId, document) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
+      }
+      match /templates/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if validTemplate(humanUserId, document);
+        allow update: if validTemplate(humanUserId, document) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
+      }
+      match /templateExercises/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if validTemplateExercise(humanUserId, document);
+        allow update: if validTemplateExercise(humanUserId, document) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
+      }
+      match /templateSets/{document} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if validTemplateSet(humanUserId, document);
+        allow update: if validTemplateSet(humanUserId, document) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
+      }
       match /sessions/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       match /loggedSets/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       // V37 records are additive. Older clients ignore this collection and
@@ -224,14 +290,16 @@ service cloud.firestore {
       }
       match /processedCommands/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       match /trainingPlans/{document} {
-        allow read, delete: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId) && createsOwnedPlannerRecord(humanUserId);
-        allow update: if ownsHumanRoot(humanUserId) && updatesOwnedPlannerRecord(humanUserId);
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if createsOwnedPlannerRecord(humanUserId) && createsOwnedVersionedRecord(humanUserId, document);
+        allow update: if updatesOwnedPlannerRecord(humanUserId) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
       }
       match /plannedWorkouts/{document} {
-        allow read, delete: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId) && createsOwnedPlannerRecord(humanUserId);
-        allow update: if ownsHumanRoot(humanUserId) && updatesOwnedPlannerRecord(humanUserId);
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if createsOwnedPlannerRecord(humanUserId) && createsOwnedVersionedRecord(humanUserId, document);
+        allow update: if updatesOwnedPlannerRecord(humanUserId) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
       }
     }
 

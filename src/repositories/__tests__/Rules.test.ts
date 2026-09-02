@@ -242,4 +242,27 @@ describe('Firestore Security Rules', () => {
       revision: 1
     }));
   });
+
+  it('enforces private exercise namespace, immutable ownership, monotonic revisions and tombstones', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const base = { schemaVersion: 1, globalId: 'private_12345678', id: 'private_12345678', humanUserId: 'human_1', name: 'Private timer', category: 'Cardio', isCustom: true, createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'WORKOUT_STUDIO' };
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', base.globalId);
+    await assertSucceeds(setDoc(ref, base));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'customExercises', 'governed_id'), { ...base, globalId: 'governed_id', id: 'governed_id' }));
+    await assertFails(updateDoc(ref, { revision: 1, name: 'collision' }));
+    await assertFails(updateDoc(ref, { revision: 2, humanUserId: 'human_2' }));
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: 2, deletedAt: 2 }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  it('enforces owner-bound normalized routine records and denies hard deletes', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const template = { globalId: 'routine_1', humanUserId: 'human_1', name: 'Routine', exerciseIdsJson: '[]', createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'app' };
+    const ref = doc(alice, 'users', 'human_1', 'templates', 'routine_1');
+    await assertSucceeds(setDoc(ref, template));
+    await assertFails(updateDoc(ref, { revision: 1, name: 'collision' }));
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: 2, name: 'Edited' }));
+    await assertFails(deleteDoc(ref));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'templateExercises', 'slot_1'), { globalId: 'slot_1', humanUserId: 'human_2', templateGlobalId: 'routine_1', exerciseId: 'squat', position: 0, createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'app' }));
+  });
 });

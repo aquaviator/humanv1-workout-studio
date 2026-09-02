@@ -3,9 +3,6 @@ import { HumanIdentity } from "../../domain/identity";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { AlertCircle, RefreshCw, UploadCloud, DownloadCloud, Trash2 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { doc, getDoc } from "firebase/firestore";
-import { set, del } from "idb-keyval";
 
 export default function ConflictCentre({ identity }: { identity: HumanIdentity }) {
   const [conflicts, setConflicts] = useState<SyncRecord[]>([]);
@@ -31,19 +28,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
       return;
     }
     try {
-      const docRef = doc(db, 'users', identity.humanUserId, `${record.type}Drafts`, record.envelope.globalId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const remoteData = snap.data();
-        const localKey = `drafts_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
-        await set(localKey, remoteData);
-      } else {
-        const localKey = `drafts_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
-        await del(localKey);
-      }
-      
-      const syncKey = `sync_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
-      await del(syncKey);
+      await syncManager.resolveWithRemote(identity.humanUserId, record);
       await loadConflicts();
     } catch (e) {
       alert("Failed to discard local changes: " + (e as Error).message);
@@ -55,30 +40,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
       return;
     }
     try {
-      const docRef = doc(db, 'users', identity.humanUserId, `${record.type}Drafts`, record.envelope.globalId);
-      const snap = await getDoc(docRef);
-      let newRevision = record.envelope.revision + 1;
-      
-      if (snap.exists()) {
-        const remoteData = snap.data();
-        if (remoteData.humanUserId !== identity.humanUserId) {
-           throw new Error("Cannot overwrite draft belonging to another user.");
-        }
-        newRevision = Math.max(newRevision, remoteData.revision + 1);
-      }
-
-      const updatedEnvelope = {
-        ...record.envelope,
-        humanUserId: identity.humanUserId,
-        revision: newRevision,
-        updatedAt: new Date().toISOString()
-      };
-
-      const localKey = `drafts_${identity.humanUserId}_${record.type}_${record.envelope.globalId}`;
-      await set(localKey, updatedEnvelope);
-
-      await syncManager.queueUpload(updatedEnvelope, record.type);
-      await syncManager.syncPending();
+      await syncManager.resolveWithLocal(identity.humanUserId, record);
       await loadConflicts();
     } catch (e) {
       alert("Failed to force overwrite: " + (e as Error).message);
@@ -125,14 +87,14 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
                   className="px-4 py-2 text-sm bg-hv-surface-2 border border-hv-border hover:bg-hv-border rounded flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
                 >
                   <DownloadCloud className="w-4 h-4" />
-                  Discard Local (Use Remote)
+                  Keep App
                 </button>
                 <button 
                   onClick={() => handleForceOverwrite(conflict)}
                   className="px-4 py-2 text-sm bg-hv-primary hover:bg-hv-primary-hover text-white rounded flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
                 >
                   <UploadCloud className="w-4 h-4" />
-                  Force Overwrite
+                  Keep Studio
                 </button>
               </div>
             </div>

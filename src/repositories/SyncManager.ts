@@ -1,9 +1,9 @@
-import { get, set, keys, setMany } from 'idb-keyval';
+import { get, set, keys, setMany, del } from 'idb-keyval';
 import { DraftEnvelope } from './DraftRepository';
 import { PublishedEnvelope } from '../domain/publication';
 import { PublishableContent } from '../domain/publication';
 import { db } from '../config/firebase';
-import { doc, runTransaction, collection, query, getDocs } from 'firebase/firestore';
+import { doc, runTransaction, collection, query, getDocs, getDoc } from 'firebase/firestore';
 
 export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
 export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
@@ -212,6 +212,29 @@ export class SyncManager {
       if (record) records.push(record);
     }
     return records;
+  }
+
+  async resolveWithRemote(humanUserId: string, record: SyncRecord): Promise<void> {
+    const remote = await getDoc(doc(db, 'users', humanUserId, `${record.type}Drafts`, record.envelope.globalId));
+    const localKey = `drafts_${humanUserId}_${record.type}_${record.envelope.globalId}`;
+    if (remote.exists()) {
+      const value = remote.data() as DraftEnvelope<PublishableContent>;
+      if (value.humanUserId !== humanUserId) throw new Error('OWNERSHIP_CONFLICT');
+      await set(localKey, value);
+    } else await del(localKey);
+    await del(`sync_${humanUserId}_${record.type}_${record.envelope.globalId}`);
+    this.notify();
+  }
+
+  async resolveWithLocal(humanUserId: string, record: SyncRecord): Promise<void> {
+    const remote = await getDoc(doc(db, 'users', humanUserId, `${record.type}Drafts`, record.envelope.globalId));
+    const remoteData = remote.exists() ? remote.data() : null;
+    if (remoteData && remoteData.humanUserId !== humanUserId) throw new Error('OWNERSHIP_CONFLICT');
+    const revision = Math.max(record.envelope.revision, typeof remoteData?.revision === 'number' ? remoteData.revision : 0) + 1;
+    const envelope = { ...record.envelope, humanUserId, revision, updatedAt: new Date().toISOString() };
+    await set(`drafts_${humanUserId}_${record.type}_${record.envelope.globalId}`, envelope);
+    await this.queueUpload(envelope, record.type);
+    await this.syncPending();
   }
 }
 

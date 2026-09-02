@@ -15,6 +15,7 @@ import { publicationRepository } from "../../repositories/PublicationRepository"
 import { Send } from "lucide-react";
 import { validatePlan } from "../../domain/validation/planValidation";
 import { AlertCircle } from "lucide-react";
+import { crossAppRepository } from "../../repositories/CrossAppRepository";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
@@ -24,6 +25,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     draftRepository.listWorkoutDrafts(identity.humanUserId).then((data) => {
       setWorkoutsData(data);
       setWorkoutsLoaded(true);
+      crossAppRepository.listAppWorkouts(identity.humanUserId).then(app => setWorkoutsData(current => [...current, ...app.filter(remote => !current.some(local => local.workoutId === remote.workoutId))])).catch(() => undefined);
     }).catch(() => {
       setWorkoutsData([]);
       setWorkoutsLoaded(true);
@@ -58,11 +60,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   useEffect(() => {
     let mounted = true;
     if (routePlanId) {
-      draftRepository.getPlanDraft(identity.humanUserId, routePlanId).then((draft) => {
+      draftRepository.getPlanDraft(identity.humanUserId, routePlanId).then(async (draft) => {
         if (!mounted) return;
-        if (draft) {
-          reset(draft);
-        }
+        const appPlan = draft ? null : (await crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])).find(item => item.planId === routePlanId);
+        if (draft || appPlan) reset(draft || appPlan!);
         setIsLoading(false);
       }).catch(() => {
         if (mounted) setIsLoading(false);
@@ -83,6 +84,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
       draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => {
+        void crossAppRepository.saveAppPlan(identity.humanUserId, plan).catch(() => undefined);
         setSaveStatus("Saved");
       }).catch(() => setSaveStatus("Unsaved"));
     }, 500);

@@ -6,13 +6,15 @@ interface ExercisePickerProps {
   exercises: Exercise[];
   onSelect: (exerciseId: string, exerciseName: string) => void;
   onClose: () => void;
+  onCreate?: () => void;
 }
 
-export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerProps) {
+export function ExercisePicker({ exercises, onSelect, onClose, onCreate }: ExercisePickerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [source, setSource] = useState<"ALL" | "CATALOGUE" | "PRIVATE">("ALL");
 
   // Reset visible count on search/filter
   useEffect(() => {
@@ -78,6 +80,8 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
   const filteredExercises = useMemo(() => {
     const normalizedQuery = normalize(searchQuery);
     return exercises.filter(ex => {
+      if (source === "PRIVATE" && ex.source !== "PRIVATE") return false;
+      if (source === "CATALOGUE" && ex.source === "PRIVATE") return false;
       // 1. Search text
       if (normalizedQuery) {
         const profile = ex.metricProfile as { primary?: string[]; secondary?: string[]; optional?: string[] } | undefined;
@@ -118,7 +122,7 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
 
       return true;
     });
-  }, [exercises, searchQuery, activeFilters]);
+  }, [exercises, searchQuery, activeFilters, source]);
 
   // Lazy loading logic
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -174,6 +178,8 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
       <div className="flex-1 overflow-y-auto flex flex-col">
         {/* Search & Filters */}
         <div className="p-4 border-b border-hv-border space-y-4 bg-hv-surface-1 sticky top-0 z-10">
+          <div className="flex gap-1" aria-label="Exercise source">{([['ALL','All'],['CATALOGUE','HumanV1 Catalogue'],['PRIVATE','Your Exercises']] as const).map(([value,label]) => <button key={value} onClick={() => setSource(value)} className={`text-xs px-2 py-1 rounded ${source === value ? 'bg-hv-primary text-white' : 'bg-hv-surface-2'}`}>{label}</button>)}</div>
+          {onCreate && <button onClick={onCreate} className="w-full text-left text-sm text-hv-primary flex gap-2 items-center"><Plus className="w-4"/>Create your exercise</button>}
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-3 text-hv-text-muted" />
             <input 
@@ -284,6 +290,7 @@ export function ExercisePicker({ exercises, onSelect, onClose }: ExercisePickerP
                 >
                   <div className="flex-1 min-w-0 pr-2">
                     <div className="font-semibold text-sm truncate group-hover:text-hv-primary transition-colors">{ex.name}</div>
+                    <span className="text-[10px] text-hv-primary">{ex.source === 'PRIVATE' ? 'Your Exercise · Private' : 'HumanV1 Catalogue'}</span>
                     <div className="text-xs text-hv-text-muted truncate flex gap-2 mt-0.5">
                       {ex.category && <span>{ex.category}</span>}
                       {ex.muscleArea && ex.muscleArea.length > 0 && (
