@@ -10,7 +10,9 @@ import { syncManager } from '../SyncManager';
 import { publicationRepository } from '../PublicationRepository';
 import { auth, db } from '../../config/firebase';
 import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { WorkoutLibraryRepository } from '../WorkoutLibraryRepository';
+import { deliveryAcknowledgementRepository } from '../DeliveryAcknowledgementRepository';
 
 import { catalogueChecksum } from '../FirebaseCatalogueRepository';
 import { Workout } from '../../domain/types';
@@ -56,6 +58,42 @@ beforeEach(async () => {
 });
 
 describe('Emulator Acceptance', () => {
+  it('Two-session published Workout discovery, exact acknowledgement, offline restoration and owner denial', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+    await clear();
+    const published = await publicationRepository.publish('human_1', 'workout', 'workout_cloud_session',
+      validWorkout('workout_cloud_session', 'Cloud Session Workout'));
+    await syncManager.syncPending();
+    await adminDb.collection('users').doc('human_1').collection('workoutDeliveryAcks').doc('wrong-version').set({
+      schemaVersion: 1, acknowledgementId: 'wrong-version', humanUserId: 'human_1', workoutGlobalId: published.globalId,
+      versionId: `${published.globalId}_r0_wrong`, applicationId: 'HUMAN_STRENGTH', appliedChecksum: published.contentChecksum,
+      sourceRevision: 0, state: 'APPLIED', reasonCode: null,
+    });
+    await adminDb.collection('users').doc('human_1').collection('workoutDeliveryAcks').doc('exact-version').set({
+      schemaVersion: 1, acknowledgementId: 'exact-version', humanUserId: 'human_1', workoutGlobalId: published.globalId,
+      versionId: published.versionId, applicationId: 'HUMAN_STRENGTH', appliedChecksum: published.contentChecksum,
+      sourceRevision: published.revision, state: 'APPLIED', reasonCode: null,
+    });
+
+    await clear(); // Session B has no local draft or publication fixture.
+    const library = new WorkoutLibraryRepository(
+      async owner => (await getDocs(collection(db, 'users', owner, 'publishedWorkouts'))).docs.map(item => item.data()),
+      owner => deliveryAcknowledgementRepository.listForOwner(owner), () => true);
+    const hydrated = await library.list('human_1');
+    expect(hydrated.items.filter(item => item.globalId === published.globalId)).toHaveLength(1);
+    expect(hydrated.items.find(item => item.globalId === published.globalId)?.state).toBe('DOWNLOADED');
+
+    const offline = new WorkoutLibraryRepository(async () => { throw new Error('offline'); }, async () => [], () => false);
+    const restored = await offline.list('human_1');
+    expect(restored.offline).toBe(true);
+    expect(restored.items.find(item => item.globalId === published.globalId)?.state).toBe('DOWNLOADED');
+    expect((await library.list('human_1')).items.filter(item => item.globalId === published.globalId)).toHaveLength(1);
+
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
+    await expect(getDocs(collection(db, 'users', 'human_1', 'publishedWorkouts'))).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(getDocs(collection(db, 'users', 'human_1', 'workoutDeliveryAcks'))).rejects.toMatchObject({ code: 'permission-denied' });
+  });
   it('Publication: unchanged republish idempotence and edited republish creates one new version', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();

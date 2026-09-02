@@ -22,17 +22,21 @@ export class DeliveryAcknowledgementRepository {
     return snapshot.docs.map(item => item.data());
   }) {}
 
-  async listForWorkout(humanUserId: string, workoutGlobalId: string): Promise<DeliveryAcknowledgement[]> {
+  async listForOwner(humanUserId: string): Promise<DeliveryAcknowledgement[]> {
     return (await this.load(humanUserId)).filter((candidate): candidate is DeliveryAcknowledgement & { schemaVersion: number } => {
       if (typeof candidate !== 'object' || candidate === null) return false;
       const value = candidate as Record<string, unknown>;
       return value.schemaVersion === 1 && value.humanUserId === humanUserId &&
-      value.workoutGlobalId === workoutGlobalId && value.applicationId === 'HUMAN_STRENGTH' &&
+      typeof value.workoutGlobalId === 'string' && value.applicationId === 'HUMAN_STRENGTH' &&
       typeof value.versionId === 'string' && typeof value.appliedChecksum === 'string' &&
       typeof value.sourceRevision === 'number' && typeof value.state === 'string' &&
         ['APPLIED', 'CONFLICT', 'REJECTED'].includes(value.state)
         && (value.reasonCode === null || typeof value.reasonCode === 'string');
     }).sort((a, b) => b.sourceRevision - a.sourceRevision);
+  }
+
+  async listForWorkout(humanUserId: string, workoutGlobalId: string): Promise<DeliveryAcknowledgement[]> {
+    return (await this.listForOwner(humanUserId)).filter(value => value.workoutGlobalId === workoutGlobalId);
   }
 }
 

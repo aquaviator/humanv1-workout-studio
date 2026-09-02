@@ -3,33 +3,41 @@ import { Link, useNavigate } from "react-router";
 import { HumanIdentity } from "../../domain/identity";
 import { Workout, Block, Effort, ExerciseBlock, SupersetBlock, CircuitBlock } from "../../domain/types";
 import { draftRepository, DraftEnvelope } from "../../repositories/DraftRepository";
-import { syncManager, SyncRecord } from "../../repositories/SyncManager";
+import { syncManager } from "../../repositories/SyncManager";
+import { workoutLibraryRepository, WorkoutLibraryItem } from "../../repositories/WorkoutLibraryRepository";
 import { v4 as uuidv4 } from "uuid";
 import { Trash2, Copy, Edit2, RotateCcw, Search, Clock, SortAsc, Archive } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export default function WorkoutsList({ identity }: { identity: HumanIdentity }) {
   const navigate = useNavigate();
-  const [envelopes, setEnvelopes] = useState<DraftEnvelope<Workout>[]>([]);
-  const [syncRecords, setSyncRecords] = useState<Record<string, SyncRecord>>({});
+  const [items, setItems] = useState<WorkoutLibraryItem[]>([]);
+  const [offline, setOffline] = useState(!navigator.onLine);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [filterDiscipline, setFilterDiscipline] = useState<string>("ALL");
   const [sortBy, setSortBy] = useState<"updatedAt" | "title" | "duration">("updatedAt");
   const [showArchived, setShowArchived] = useState(false);
 
   const loadData = async () => {
-    const envs = await draftRepository.listWorkoutEnvelopes(identity.humanUserId);
-    setEnvelopes(envs);
-    const syncs = await syncManager.listSyncRecords(identity.humanUserId, "workout");
-    const syncMap: Record<string, SyncRecord> = {};
-    for (const s of syncs) syncMap[s.envelope.globalId] = s;
-    setSyncRecords(syncMap);
+    try {
+      const result = await workoutLibraryRepository.list(identity.humanUserId);
+      setItems(result.items);
+      setOffline(result.offline);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    }
   };
 
   useEffect(() => {
-    loadData();
+    void syncManager.syncDown(identity.humanUserId, ["workout"]).finally(loadData);
     const interval = setInterval(loadData, 5000);
-    return () => clearInterval(interval);
+    const refresh = () => void loadData();
+    window.addEventListener("online", refresh);
+    window.addEventListener("offline", refresh);
+    const unsubscribe = syncManager.subscribe(refresh);
+    return () => { clearInterval(interval); window.removeEventListener("online", refresh); window.removeEventListener("offline", refresh); unsubscribe(); };
   }, [identity.humanUserId]);
 
   const handleDuplicate = async (workout: Workout) => {
@@ -81,18 +89,18 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
     loadData();
   };
 
-  const filtered = envelopes.filter(env => {
-    if (env.deletedAt && !showArchived) return false;
-    if (!env.deletedAt && showArchived) return false;
-    if (filterDiscipline !== "ALL" && env.payload.discipline !== filterDiscipline) return false;
-    if (search && !env.payload.title.toLowerCase().includes(search.toLowerCase())) return false;
+  const filtered = items.filter(item => {
+    if (item.draft?.deletedAt && !showArchived) return false;
+    if (!item.draft?.deletedAt && showArchived) return false;
+    if (filterDiscipline !== "ALL" && item.workout.discipline !== filterDiscipline) return false;
+    if (search && !item.workout.title.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
   filtered.sort((a, b) => {
     if (sortBy === "updatedAt") return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    if (sortBy === "title") return a.payload.title.localeCompare(b.payload.title);
-    if (sortBy === "duration") return (b.payload.estimatedDurationSeconds || 0) - (a.payload.estimatedDurationSeconds || 0);
+    if (sortBy === "title") return a.workout.title.localeCompare(b.workout.title);
+    if (sortBy === "duration") return (b.workout.estimatedDurationSeconds || 0) - (a.workout.estimatedDurationSeconds || 0);
     return 0;
   });
 
@@ -104,6 +112,8 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
           Create Workout
         </Link>
       </div>
+      {offline && <div role="status" className="mb-4 rounded-md border border-hv-warning px-3 py-2 text-sm text-hv-warning">Offline — showing the last verified cloud status.</div>}
+      {loadError && <div role="alert" className="mb-4 rounded-md border border-hv-error px-3 py-2 text-sm text-hv-error">Workout status could not be loaded. Retry required.</div>}
 
       <div className="flex flex-wrap gap-4 mb-6">
         <div className="flex-1 min-w-[200px] relative">
@@ -148,20 +158,23 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto">
-        {filtered.map(env => {
-          const workout = env.payload;
-          const syncState = syncRecords[workout.workoutId]?.status || (env.deletedAt ? "LOCAL_ARCHIVED" : "LOCAL");
+        {filtered.map(item => {
+          const workout = item.workout;
+          const env = item.draft;
+          const statusText = item.state === "DOWNLOADED" ? "Downloaded by Human Strength" :
+            item.state === "SENT" ? "Sent to your apps" : item.state === "RETRY_REQUIRED" ? "Retry required" :
+            item.state.charAt(0) + item.state.slice(1).toLowerCase();
           return (
             <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
               <div className="flex justify-between items-start mb-2">
                 <h2 
                   className="font-semibold cursor-pointer hover:text-hv-primary" 
-                  onClick={() => !env.deletedAt && navigate(`/workouts/${workout.workoutId}`)}
+                  onClick={() => env && !env.deletedAt && navigate(`/workouts/${workout.workoutId}`)}
                 >
                   {workout.title}
                 </h2>
                 <div className="flex gap-2">
-                  {!env.deletedAt && (
+                  {env && !env.deletedAt && (
                     <>
                       <button onClick={() => handleRename(env)} className="text-hv-text-muted hover:text-hv-text" aria-label="Rename">
                         <Edit2 className="w-4 h-4" />
@@ -174,13 +187,14 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                       </button>
                     </>
                   )}
-                  {env.deletedAt && (
+                  {env?.deletedAt && (
                     <button onClick={() => handleRestore(env)} className="text-hv-text-muted hover:text-hv-primary" aria-label="Restore">
                       <RotateCcw className="w-4 h-4" />
                     </button>
                   )}
                 </div>
               </div>
+              {item.latestVersion && <div className="mb-2 text-xs text-hv-text-muted">Latest published revision {item.latestVersion.revision} · {item.versions.length} immutable version{item.versions.length === 1 ? "" : "s"}</div>}
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xs bg-hv-surface-2 px-2 py-1 rounded text-hv-text-muted uppercase tracking-wider font-semibold">
                   {workout.discipline}
@@ -195,15 +209,15 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
               </p>
               <div className="flex justify-between items-center mt-2 border-t border-hv-border pt-2 text-xs">
                 <span className="text-hv-text-muted">
-                  Updated {new Date(env.updatedAt).toLocaleDateString()}
+                  Updated {new Date(item.updatedAt).toLocaleDateString()}
                 </span>
                 <span className={cn(
                   "font-medium",
-                  syncState === "SYNCED" ? "text-hv-primary" : 
-                  syncState === "CONFLICT" ? "text-hv-error" : 
-                  syncState === "QUEUED" ? "text-hv-warning" : "text-hv-text-muted"
+                  item.state === "DOWNLOADED" || item.state === "SENT" ? "text-hv-primary" :
+                  item.state === "CONFLICT" || item.state === "RETRY_REQUIRED" ? "text-hv-error" :
+                  item.state === "QUEUED" ? "text-hv-warning" : "text-hv-text-muted"
                 )}>
-                  {syncState}
+                  {statusText}
                 </span>
               </div>
             </div>
