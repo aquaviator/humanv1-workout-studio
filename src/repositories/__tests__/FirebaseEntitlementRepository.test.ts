@@ -42,6 +42,19 @@ describe('FirebaseEntitlementRepository current projection', () => {
     expect(await wrongOwner.getEntitlement('human-1')).toEqual({ state: 'VERIFICATION_UNAVAILABLE' });
   });
 
+  it('selects the Workout Studio scope from a simultaneous multi-product projection', async () => {
+    const repository = new FirebaseEntitlementRepository(vi.fn(async () => projection({
+      productScope: undefined,
+      products: {
+        HUMAN_STRENGTH: { normalizedState: 'ACTIVE_UNTIL_EXPIRY', source: 'SUPPORT', expiryAt: Timestamp.fromMillis(20_000) },
+        WORKOUT_STUDIO: { normalizedState: 'ACTIVE_UNTIL_EXPIRY', source: 'SUPPORT', expiryAt: Timestamp.fromMillis(10_000), offlineReceiptValidUntil: Timestamp.fromMillis(8_000) }
+      }
+    })), () => 2_000);
+    expect(await repository.getEntitlement('human-1')).toEqual(expect.objectContaining({
+      state: 'ACTIVE_UNTIL_EXPIRY', expiresAt: new Date(10_000).toISOString()
+    }));
+  });
+
   it('uses the owner-bound cache only inside its governed offline window', async () => {
     await new FirebaseEntitlementRepository(vi.fn(async () => projection()), () => 2_000).getEntitlement('human-1');
     const offline = vi.fn(async () => { throw new Error('offline'); });

@@ -14,6 +14,10 @@ interface CurrentProjection {
   offlineReceiptValidUntil: Timestamp;
   introductoryState?: 'EXPIRED';
   introductoryExpiredAt?: Timestamp;
+  products?: Record<string, {
+    normalizedState: CurrentProjection['normalizedState']; source: CurrentProjection['source'];
+    expiryAt: Timestamp; offlineReceiptValidUntil: Timestamp;
+  }>;
 }
 
 interface EntitlementReceipt {
@@ -61,11 +65,13 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
   }
 
   private toReceipt(value: CurrentProjection, humanUserId: string, authUid: string): EntitlementReceipt {
-    if (value.schemaVersion !== 1 || value.firebaseUid !== authUid || value.humanUserId !== humanUserId || value.productScope !== 'WORKOUT_STUDIO') throw new Error('Entitlement projection mismatch');
-    const expiresAtMillis = value.expiryAt?.toMillis?.();
-    const offlineValidUntilMillis = value.offlineReceiptValidUntil?.toMillis?.();
+    if (value.schemaVersion !== 1 || value.firebaseUid !== authUid || value.humanUserId !== humanUserId) throw new Error('Entitlement projection mismatch');
+    const product = value.products?.WORKOUT_STUDIO ?? (value.productScope === 'WORKOUT_STUDIO' ? value : undefined);
+    if (!product) throw new Error('Workout Studio entitlement is absent');
+    const expiresAtMillis = product.expiryAt?.toMillis?.();
+    const offlineValidUntilMillis = product.offlineReceiptValidUntil?.toMillis?.();
     if (!Number.isFinite(expiresAtMillis) || !Number.isFinite(offlineValidUntilMillis)) throw new Error('Malformed entitlement expiry');
-    return { schemaVersion: 2, authUid, humanUserId, state: value.normalizedState, source: value.source, expiresAtMillis, offlineValidUntilMillis, introductoryState: value.introductoryState, introductoryExpiredAtMillis: value.introductoryExpiredAt?.toMillis?.() };
+    return { schemaVersion: 2, authUid, humanUserId, state: product.normalizedState, source: product.source, expiresAtMillis, offlineValidUntilMillis, introductoryState: value.introductoryState, introductoryExpiredAtMillis: value.introductoryExpiredAt?.toMillis?.() };
   }
 
   private checkValidity(receipt: EntitlementReceipt): Entitlement {

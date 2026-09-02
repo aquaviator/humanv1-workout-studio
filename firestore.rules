@@ -21,10 +21,13 @@ service cloud.firestore {
         && current.data.schemaVersion == 1
         && current.data.firebaseUid == request.auth.uid
         && current.data.humanUserId == humanUserId
-        && current.data.normalizedState == "ACTIVE_UNTIL_EXPIRY"
-        && current.data.productScope == "WORKOUT_STUDIO"
-        && current.data.expiryAt is timestamp
-        && current.data.expiryAt > request.time;
+        && ((current.data.normalizedState == "ACTIVE_UNTIL_EXPIRY"
+              && current.data.productScope == "WORKOUT_STUDIO"
+              && current.data.expiryAt is timestamp
+              && current.data.expiryAt > request.time)
+          || (current.data.products.WORKOUT_STUDIO.normalizedState == "ACTIVE_UNTIL_EXPIRY"
+              && current.data.products.WORKOUT_STUDIO.expiryAt is timestamp
+              && current.data.products.WORKOUT_STUDIO.expiryAt > request.time));
     }
     function createsOwnedPlannerRecord(humanUserId) {
       return request.resource.data.humanUserId == humanUserId;
@@ -112,6 +115,34 @@ service cloud.firestore {
       return validPublishedVersion(humanUserId, versionId, "plan")
         && request.resource.data.payload.weeks is list;
     }
+    function validWorkoutDeliveryAck(humanUserId, acknowledgementId) {
+      let publication = get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(request.resource.data.versionId));
+      return request.resource.data.keys().hasOnly([
+          "schemaVersion", "acknowledgementId", "humanUserId", "workoutGlobalId",
+          "versionId", "applicationId", "appliedChecksum", "sourceRevision",
+          "state", "reasonCode", "clientAppliedAtMillis", "createdAt"
+        ])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.acknowledgementId == acknowledgementId
+        && request.resource.data.humanUserId == humanUserId
+        && request.resource.data.workoutGlobalId is string
+        && request.resource.data.workoutGlobalId != ""
+        && request.resource.data.versionId is string
+        && request.resource.data.versionId != ""
+        && request.resource.data.applicationId == "HUMAN_STRENGTH"
+        && request.resource.data.appliedChecksum is string
+        && request.resource.data.appliedChecksum.matches("^[0-9a-f]{64}$")
+        && request.resource.data.sourceRevision is int
+        && request.resource.data.sourceRevision >= 1
+        && request.resource.data.state in ["APPLIED", "CONFLICT", "REJECTED"]
+        && (request.resource.data.reasonCode == null || request.resource.data.reasonCode is string)
+        && request.resource.data.clientAppliedAtMillis is int
+        && request.resource.data.createdAt == request.time
+        && publication.data.humanUserId == humanUserId
+        && publication.data.globalId == request.resource.data.workoutGlobalId
+        && publication.data.revision == request.resource.data.sourceRevision
+        && publication.data.contentChecksum == request.resource.data.appliedChecksum;
+    }
 
     match /accounts/{uid} {
       allow get: if isAuthenticated() && request.auth.uid == uid;
@@ -183,6 +214,12 @@ service cloud.firestore {
         allow read: if ownsHumanRoot(humanUserId);
         allow create: if hasActiveStudioEntitlement(humanUserId)
           && validPublishedVersion(humanUserId, versionId, "protocol");
+        allow update, delete: if false;
+      }
+      match /workoutDeliveryAcks/{acknowledgementId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId)
+          && validWorkoutDeliveryAck(humanUserId, acknowledgementId);
         allow update, delete: if false;
       }
       match /processedCommands/{document} { allow read, write: if ownsHumanRoot(humanUserId); }

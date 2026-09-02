@@ -3,7 +3,7 @@
   "ownerBranch": "codex/entitlement-contract",
   "ownerCommit": "bc11627f5f97000008884ed22ce0cdd09cd2adef",
   "deployableFile": "firestore.rules",
-  "sha256": "a863e16253066b42d0098f41666fc0631a59a88bbcd89c7c9d14663b1b93ae42",
+  "sha256": "c849e990cc5ed598ad80d390372a211c92273899c5b4ddfca754b1091d5e6458",
   "hashNormalization": "LF",
   "firebaseProject": "hv1-platform",
   "deploymentAuthorized": true

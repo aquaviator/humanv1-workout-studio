@@ -16,6 +16,7 @@ import { validateWorkout } from "../../domain/validation/workoutValidation";
 import { AthletePreview } from "../components/AthletePreview";
 import { publicationRepository } from "../../repositories/PublicationRepository";
 import { Send } from "lucide-react";
+import { deliveryAcknowledgementRepository, DeliveryAcknowledgement } from "../../repositories/DeliveryAcknowledgementRepository";
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
   const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
@@ -40,16 +41,24 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [activeTab, setActiveTab] = useState<'builder' | 'preview'>('builder');
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryAcknowledgement | null>(null);
   
   useEffect(() => {
     if (!workout.workoutId) return;
     const fetchStatus = async () => {
       const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'workout');
-      const record = records.find(r => (r.envelope as PublishedEnvelope<Workout>).sourceDraftId === workout.workoutId);
+      const record = records.filter(r => (r.envelope as PublishedEnvelope<Workout>).sourceDraftId === workout.workoutId)
+        .sort((a, b) => (b.envelope as PublishedEnvelope<Workout>).revision - (a.envelope as PublishedEnvelope<Workout>).revision)[0];
       setSyncRecord(record || null);
+      if (record?.status === 'SYNCED') {
+        const latest = (await deliveryAcknowledgementRepository.listForWorkout(identity.humanUserId, workout.workoutId))[0];
+        setDelivery(latest || null);
+      } else setDelivery(null);
     };
     fetchStatus();
-    const unsub = syncManager.subscribe(fetchStatus); return () => { unsub(); };
+    const unsub = syncManager.subscribe(fetchStatus);
+    const interval = setInterval(fetchStatus, 5000);
+    return () => { unsub(); clearInterval(interval); };
   }, [workout.workoutId, identity.humanUserId]);
   
   const publishStatus = useMemo(() => {
@@ -57,12 +66,16 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     switch (syncRecord.status) {
       case 'QUEUED': return "Queued—will send when connected";
       case 'SENDING': return "Sending";
-      case 'SYNCED': return "Available in your apps";
+      case 'SYNCED':
+        if (delivery?.state === 'APPLIED') return "Downloaded by Human Strength";
+        if (delivery?.state === 'CONFLICT') return `Human Strength conflict${delivery.reasonCode ? `: ${delivery.reasonCode}` : ''}`;
+        if (delivery?.state === 'REJECTED') return `Human Strength rejected${delivery.reasonCode ? `: ${delivery.reasonCode}` : ''}`;
+        return "Available in your apps";
       case 'CONFLICT': return "Conflict";
       case 'FAILED': return "Retry required";
       default: return "";
     }
-  }, [syncRecord]);
+  }, [syncRecord, delivery]);
 
 
   const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);
