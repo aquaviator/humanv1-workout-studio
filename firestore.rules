@@ -136,13 +136,55 @@ service cloud.firestore {
         && request.resource.data.revision > resource.data.revision;
     }
     function validPrivateExercise(humanUserId, documentId) {
+      let data = request.resource.data;
+      let keys = data.keys();
+      let supportedMetrics = [
+        'repetitions', 'repetition_count', 'load', 'external_load',
+        'bodyweight', 'weighted_bodyweight', 'assisted_load', 'assistance',
+        'duration', 'distance', 'pace', 'calories', 'energy', 'rpe', 'rir',
+        'tempo', 'intervals', 'side'
+      ];
       return createsOwnedVersionedRecord(humanUserId, documentId)
-        && documentId.matches('^(private|custom)_[A-Za-z0-9_-]{8,}$')
-        && request.resource.data.id == documentId
-        && request.resource.data.isCustom == true
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.category is string;
+        && keys.hasOnly([
+          'schemaVersion', 'globalId', 'id', 'humanUserId', 'name', 'description',
+          'category', 'equipment', 'primaryMuscles', 'muscleArea',
+          'modalitySuitability', 'capabilities', 'isCustom', 'createdAt',
+          'updatedAt', 'revision', 'deletedAt', 'originApplication',
+          'originDeviceId', 'lastSyncedAt'
+        ])
+        && (!keys.hasAny(['schemaVersion']) || data.schemaVersion == 1)
+        && data.id is string
+        && documentId.matches('^(private|custom|exercise)_[A-Za-z0-9_-]{8,}$')
+        && ((documentId.matches('^exercise_[A-Za-z0-9_-]{8,}$')
+              && data.id.matches('^custom_[A-Za-z0-9_-]{8,}$'))
+            || (documentId.matches('^(private|custom)_[A-Za-z0-9_-]{8,}$')
+              && data.id == documentId))
+        && data.isCustom == true
+        && data.name is string
+        && data.name.size() > 0
+        && data.category is string
+        && data.originDeviceId is string
+        && data.originDeviceId.size() > 0
+        && (!keys.hasAny(['lastSyncedAt']) || data.lastSyncedAt is int)
+        && (!keys.hasAny(['originApplication']) || data.originApplication is string)
+        && (!keys.hasAny(['description']) || data.description == null || data.description is string)
+        && (!keys.hasAny(['equipment']) || data.equipment is list)
+        && (!keys.hasAny(['primaryMuscles']) || data.primaryMuscles is list)
+        && (!keys.hasAny(['muscleArea']) || data.muscleArea is list)
+        && (!keys.hasAny(['modalitySuitability']) || data.modalitySuitability is list)
+        && (!keys.hasAny(['capabilities']) || (
+          data.capabilities is map
+          && data.capabilities.keys().hasAll(['primary', 'secondary', 'optional', 'unsupported'])
+          && data.capabilities.keys().hasOnly(['primary', 'secondary', 'optional', 'unsupported'])
+          && data.capabilities.primary is list
+          && data.capabilities.secondary is list
+          && data.capabilities.optional is list
+          && data.capabilities.unsupported is list
+          && data.capabilities.primary.hasOnly(supportedMetrics)
+          && data.capabilities.secondary.hasOnly(supportedMetrics)
+          && data.capabilities.optional.hasOnly(supportedMetrics)
+          && data.capabilities.unsupported.hasOnly(supportedMetrics)
+        ));
     }
     function validTemplate(humanUserId, documentId) {
       return createsOwnedVersionedRecord(humanUserId, documentId)

@@ -255,6 +255,124 @@ describe('Firestore Security Rules', () => {
     await assertFails(deleteDoc(ref));
   });
 
+  const androidPrivate = (globalId = 'exercise_6cc2f8f0d0a5') => ({
+    globalId, id: 'custom_3deb463a-eda2-416b-86ac-931463496ec9',
+    humanUserId: 'human_1', name: 'Android private', category: 'Chest', isCustom: true,
+    createdAt: 10, updatedAt: 10, deletedAt: null, revision: 1,
+    originDeviceId: 'device_android_1', lastSyncedAt: 11,
+  });
+  const studioPrivate = (globalId = 'private_12345678') => ({
+    schemaVersion: 1, globalId, id: globalId, humanUserId: 'human_1',
+    name: 'Studio private', description: null, category: 'Cardio', equipment: [],
+    primaryMuscles: [], muscleArea: [], modalitySuitability: [],
+    capabilities: { primary: ['duration'], secondary: [], optional: [], unsupported: ['external_load'] },
+    isCustom: true, createdAt: 10, updatedAt: 10, deletedAt: null, revision: 1,
+    originApplication: 'WORKOUT_STUDIO', originDeviceId: 'WORKOUT_STUDIO', lastSyncedAt: 11,
+  });
+
+  it('accepts the exact Android private-exercise wire shape', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate();
+    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'customExercises', value.globalId), value));
+  });
+
+  it('accepts the exact Studio private-exercise wire shape', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = studioPrivate();
+    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'customExercises', value.globalId), value));
+  });
+
+  it('allows a clean owner client to reconstruct a private exercise', async () => {
+    const writer = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate('exercise_clean123');
+    const ref = doc(writer, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    const cleanClient = testEnv.authenticatedContext('auth_1').firestore();
+    await assertSucceeds(getDoc(doc(cleanClient, 'users', 'human_1', 'customExercises', value.globalId)));
+  });
+
+  it('denies private-exercise owner reassignment', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate('exercise_owner123');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertFails(updateDoc(ref, { humanUserId: 'human_2', revision: 2, updatedAt: 12 }));
+  });
+
+  it('denies cross-owner private-exercise reads and writes', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
+    const value = androidPrivate('exercise_cross123');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertFails(getDoc(doc(bob, 'users', 'human_1', 'customExercises', value.globalId)));
+    await assertFails(setDoc(doc(bob, 'users', 'human_1', 'customExercises', 'exercise_forged12'), androidPrivate('exercise_forged12')));
+  });
+
+  it('denies governed-ID collision in the private collection', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'customExercises', 'bench_press'), {
+      ...androidPrivate('bench_press'), globalId: 'bench_press', id: 'bench_press',
+    }));
+  });
+
+  it('denies hard deletion of a private exercise', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate('exercise_delete12');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertFails(deleteDoc(ref));
+  });
+
+  it('accepts a valid private-exercise revision increment', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate('exercise_update12');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: 12, name: 'Updated private' }));
+  });
+
+  it('denies stale and equal private-exercise revisions', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = androidPrivate('exercise_stale123');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: 12 }));
+    await assertFails(updateDoc(ref, { revision: 2, updatedAt: 13 }));
+    await assertFails(updateDoc(ref, { revision: 1, updatedAt: 14 }));
+  });
+
+  it('archives and restores only through increasing revisions', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = studioPrivate('private_archive12');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await setDoc(ref, value);
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: 12, deletedAt: 12 }));
+    await assertFails(updateDoc(ref, { revision: 2, updatedAt: 13, deletedAt: null }));
+    await assertSucceeds(updateDoc(ref, { revision: 3, updatedAt: 14, deletedAt: null }));
+  });
+
+  it('denies malformed capability and field representations', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = studioPrivate('private_malformed12');
+    const ref = doc(alice, 'users', 'human_1', 'customExercises', value.globalId);
+    await assertFails(setDoc(ref, { ...value, capabilities: { ...value.capabilities, primary: ['telepathy'] } }));
+    await assertFails(setDoc(ref, { ...value, createdAt: '10' }));
+    await assertFails(setDoc(ref, { ...value, unexpectedAuthority: true }));
+  });
+
+  it('keeps existing valid private-exercise documents readable', async () => {
+    await testEnv.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), 'users', 'human_1', 'customExercises', 'custom_legacy123'), {
+        globalId: 'custom_legacy123', id: 'custom_legacy123', humanUserId: 'human_1',
+        name: 'Existing private', category: 'Other', isCustom: true,
+        createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'legacy-device',
+      });
+    });
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    await assertSucceeds(getDoc(doc(alice, 'users', 'human_1', 'customExercises', 'custom_legacy123')));
+  });
+
   it('enforces owner-bound normalized routine records and denies hard deletes', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const template = { globalId: 'routine_1', humanUserId: 'human_1', name: 'Routine', exerciseIdsJson: '[]', createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'app' };
