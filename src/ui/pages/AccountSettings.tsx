@@ -25,8 +25,14 @@ export default function AccountSettings({ identity }: { identity: HumanIdentity 
           <div>{identity.email}</div>
         </div>
         <div className="mb-4">
-          <div className="text-sm text-hv-text-muted">Entitlement</div>
+          <div className="text-sm text-hv-text-muted">Workout Studio access</div>
           <div>{entitlement ? entitlement.state : "LOADING..."}</div>
+          {entitlement?.expiresAt && <div className="text-sm text-hv-text-muted">Until {new Date(entitlement.expiresAt).toLocaleString()}</div>}
+        </div>
+        <div className="mb-4">
+          <div className="text-sm text-hv-text-muted">Introductory access</div>
+          <div>{entitlement?.introductoryState ?? "NOT REPORTED"}</div>
+          {entitlement?.introductoryExpiredAt && <div className="text-sm text-hv-text-muted">Ended {new Date(entitlement.introductoryExpiredAt).toLocaleString()}</div>}
         </div>
         <div className="mb-8">
           <div className="text-sm text-hv-text-muted">User ID</div>

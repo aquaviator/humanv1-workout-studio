@@ -15,6 +15,17 @@ service cloud.firestore {
         && root.data.schemaVersion == 1
         && root.data.ownerFirebaseUid == request.auth.uid;
     }
+    function hasActiveStudioEntitlement(humanUserId) {
+      let current = get(/databases/$(database)/documents/accounts/$(request.auth.uid)/entitlements/current);
+      return ownsHumanRoot(humanUserId)
+        && current.data.schemaVersion == 1
+        && current.data.firebaseUid == request.auth.uid
+        && current.data.humanUserId == humanUserId
+        && current.data.normalizedState == "ACTIVE_UNTIL_EXPIRY"
+        && current.data.productScope == "WORKOUT_STUDIO"
+        && current.data.expiryAt is timestamp
+        && current.data.expiryAt > request.time;
+    }
     function createsOwnedPlannerRecord(humanUserId) {
       return request.resource.data.humanUserId == humanUserId;
     }
@@ -105,7 +116,10 @@ service cloud.firestore {
     match /accounts/{uid} {
       allow get: if isAuthenticated() && request.auth.uid == uid;
       allow list, create, update, delete: if false;
+      match /entitlements/current { allow get: if isAuthenticated() && request.auth.uid == uid; allow list, write: if false; }
       match /entitlements/{document=**} { allow read, write: if false; }
+      match /entitlementGrants/{document=**} { allow read, write: if false; }
+      match /entitlementEvents/{document=**} { allow read, write: if false; }
     }
 
     match /users/{humanUserId} {
@@ -134,20 +148,20 @@ service cloud.firestore {
       // soft-delete only. They do not confer platform authority.
       match /workoutDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if createsStudioDraft(humanUserId, document);
-        allow update: if updatesStudioDraft(humanUserId, document);
+        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document);
+        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document);
         allow delete: if false;
       }
       match /planDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if createsStudioDraft(humanUserId, document);
-        allow update: if updatesStudioDraft(humanUserId, document);
+        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document);
+        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document);
         allow delete: if false;
       }
       match /protocolDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if createsStudioDraft(humanUserId, document);
-        allow update: if updatesStudioDraft(humanUserId, document);
+        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document);
+        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document);
         allow delete: if false;
       }
       // Published versions are append-only immutable records. Plans carry
@@ -155,19 +169,19 @@ service cloud.firestore {
       // application validation proves every placement has that version key.
       match /publishedWorkouts/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId)
+        allow create: if hasActiveStudioEntitlement(humanUserId)
           && validPublishedVersion(humanUserId, versionId, "workout");
         allow update, delete: if false;
       }
       match /publishedPlans/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId)
+        allow create: if hasActiveStudioEntitlement(humanUserId)
           && validPublishedPlan(humanUserId, versionId);
         allow update, delete: if false;
       }
       match /publishedProtocols/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId)
+        allow create: if hasActiveStudioEntitlement(humanUserId)
           && validPublishedVersion(humanUserId, versionId, "protocol");
         allow update, delete: if false;
       }

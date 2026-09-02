@@ -35,6 +35,11 @@ beforeAll(async () => {
   await adminDb.collection('accounts').doc('auth_2').set({ humanUserId: 'human_2', status: 'ACTIVE', schemaVersion: 1 });
   await adminDb.collection('users').doc('human_1').set({ ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 1' });
   await adminDb.collection('users').doc('human_2').set({ ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1, displayName: 'User 2' });
+  await adminDb.collection('accounts').doc('auth_1').collection('entitlements').doc('current').set({
+    schemaVersion: 1, firebaseUid: 'auth_1', humanUserId: 'human_1',
+    normalizedState: 'ACTIVE_UNTIL_EXPIRY', productScope: 'WORKOUT_STUDIO', source: 'SUPPORT',
+    expiryAt: new Date('2099-01-01T00:00:00.000Z'), offlineReceiptValidUntil: new Date('2099-01-01T00:00:00.000Z')
+  });
   
   // Seed catalogue
   const mockExercise = { exerciseId: 'ex1', name: 'Push Up', equipment: [], category: '', aliases: [], metricProfile: { primary: ['repetitions'], secondary: [], optional: [], unsupported: [] } };
@@ -184,13 +189,14 @@ describe('Emulator Acceptance', () => {
     expect(ex.length).toBeGreaterThan(0);
   });
 
-  it('Entitlement checking without false expiry', async () => {
-    // Browser clients have no entitlement authority in the governed contract.
-    // A denied/missing verification must fail closed, never invent EXPIRED.
+  it('reads the owner-bound current projection and fails closed when it is missing', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     const entRepo = new FirebaseEntitlementRepository();
-    const entitlement = await entRepo.getEntitlement('human_1');
-    expect(entitlement.state).toBe('VERIFICATION_UNAVAILABLE');
+    expect((await entRepo.getEntitlement('human_1')).state).toBe('ACTIVE_UNTIL_EXPIRY');
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
+    expect(auth.currentUser?.uid).toBe('auth_2');
+    expect((await new FirebaseEntitlementRepository().getEntitlement('human_2')).state).toBe('VERIFICATION_UNAVAILABLE');
   });
 
   it('Workout round trip, Conflict isolation, Offline creation', async () => {

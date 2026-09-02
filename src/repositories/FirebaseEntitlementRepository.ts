@@ -1,63 +1,54 @@
-import { Entitlement, EntitlementRepository, EntitlementState } from '../domain/entitlement';
-import { auth } from '../config/firebase';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import { Entitlement, EntitlementRepository } from '../domain/entitlement';
+import { auth, db } from '../config/firebase';
 import * as idb from 'idb-keyval';
 
-const ACCOUNT_TRIAL_ENDPOINT = 'https://europe-west1-hv1-platform.cloudfunctions.net/initializeAccountTrial';
-const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000;
-
-interface AccountTrialResponse {
-  status: 'ACTIVE' | 'EXPIRED' | 'DISABLED';
-  trialStartedAtMillis?: number;
-  trialEndsAtMillis?: number;
-  serverNowMillis: number;
+interface CurrentProjection {
+  schemaVersion: 1;
+  firebaseUid: string;
+  humanUserId: string;
+  normalizedState: 'ACTIVE_UNTIL_EXPIRY' | 'EXPIRED' | 'REVOKED' | 'UNENTITLED';
+  productScope: 'WORKOUT_STUDIO';
+  source: 'SUPPORT' | 'INTRODUCTORY';
+  expiryAt: Timestamp;
+  offlineReceiptValidUntil: Timestamp;
+  introductoryState?: 'EXPIRED';
+  introductoryExpiredAt?: Timestamp;
 }
 
 interface EntitlementReceipt {
-  schemaVersion: 1;
-  humanUserId: string;
+  schemaVersion: 2;
   authUid: string;
-  state: Extract<EntitlementState, 'TRIAL_ACTIVE' | 'EXPIRED' | 'UNENTITLED'>;
-  trialStartedAtMillis: number | null;
-  expiresAtMillis: number | null;
-  verifiedServerNowMillis: number;
+  humanUserId: string;
+  state: CurrentProjection['normalizedState'];
+  source: CurrentProjection['source'];
+  expiresAtMillis: number;
   offlineValidUntilMillis: number;
+  introductoryState?: 'EXPIRED';
+  introductoryExpiredAtMillis?: number;
 }
 
-type Fetcher = typeof fetch;
+type ProjectionLoader = (uid: string) => Promise<CurrentProjection>;
+const loadProjection: ProjectionLoader = async uid => {
+  const snapshot = await getDoc(doc(db, 'accounts', uid, 'entitlements', 'current'));
+  if (!snapshot.exists()) throw new Error('Current entitlement projection is absent');
+  return snapshot.data() as CurrentProjection;
+};
 
 export class FirebaseEntitlementRepository implements EntitlementRepository {
-  constructor(
-    private readonly fetcher: Fetcher = fetch,
-    private readonly now: () => number = Date.now,
-    private readonly endpoint: string = ACCOUNT_TRIAL_ENDPOINT
-  ) {}
-
-  private getCacheKey(humanUserId: string) {
-    return `entitlement_receipt_${humanUserId}`;
-  }
+  constructor(private readonly loader: ProjectionLoader = loadProjection, private readonly now: () => number = Date.now) {}
+  private getCacheKey(humanUserId: string) { return `entitlement_receipt_${humanUserId}`; }
 
   async getEntitlement(humanUserId: string): Promise<Entitlement> {
     const user = auth.currentUser;
     if (!user) return { state: 'VERIFICATION_UNAVAILABLE' };
-
     try {
-      const idToken = await user.getIdToken(false);
-      const response = await this.fetcher(this.endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-        body: '{}'
-      });
-      if (!response.ok) throw new Error(`Trial verification returned ${response.status}`);
-
-      const payload = await response.json() as AccountTrialResponse;
-      const receipt = this.toReceipt(payload, humanUserId, user.uid);
+      const receipt = this.toReceipt(await this.loader(user.uid), humanUserId, user.uid);
       await idb.set(this.getCacheKey(humanUserId), receipt);
       return this.checkValidity(receipt);
     } catch {
       const cached = await idb.get<EntitlementReceipt>(this.getCacheKey(humanUserId));
-      if (cached?.schemaVersion === 1 && cached.authUid === user.uid && cached.humanUserId === humanUserId) {
-        return this.checkValidity(cached);
-      }
+      if (cached?.schemaVersion === 2 && cached.authUid === user.uid && cached.humanUserId === humanUserId) return this.checkValidity(cached);
       return { state: 'VERIFICATION_UNAVAILABLE' };
     }
   }
@@ -65,46 +56,25 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
   onEntitlementChanged(humanUserId: string, callback: (entitlement: Entitlement) => void): () => void {
     let cancelled = false;
     callback({ state: 'CHECKING' });
-    void this.getEntitlement(humanUserId).then(entitlement => {
-      if (!cancelled) callback(entitlement);
-    });
+    void this.getEntitlement(humanUserId).then(value => { if (!cancelled) callback(value); });
     return () => { cancelled = true; };
   }
 
-  private toReceipt(payload: AccountTrialResponse, humanUserId: string, authUid: string): EntitlementReceipt {
-    if (!Number.isFinite(payload.serverNowMillis) || payload.serverNowMillis <= 0) throw new Error('Malformed server time');
-
-    if (payload.status === 'DISABLED') {
-      return {
-        schemaVersion: 1, humanUserId, authUid, state: 'UNENTITLED',
-        trialStartedAtMillis: null, expiresAtMillis: null,
-        verifiedServerNowMillis: payload.serverNowMillis,
-        offlineValidUntilMillis: payload.serverNowMillis
-      };
-    }
-
-    const startedAt = payload.trialStartedAtMillis;
-    const endsAt = payload.trialEndsAtMillis;
-    if (!Number.isFinite(startedAt) || !Number.isFinite(endsAt) || startedAt! <= 0 || endsAt! <= startedAt!) {
-      throw new Error('Malformed introductory access receipt');
-    }
-    const state = payload.status === 'ACTIVE' ? 'TRIAL_ACTIVE' : 'EXPIRED';
-    return {
-      schemaVersion: 1, humanUserId, authUid, state,
-      trialStartedAtMillis: startedAt!, expiresAtMillis: endsAt!,
-      verifiedServerNowMillis: payload.serverNowMillis,
-      offlineValidUntilMillis: Math.min(endsAt!, payload.serverNowMillis + MAX_OFFLINE_MS)
-    };
+  private toReceipt(value: CurrentProjection, humanUserId: string, authUid: string): EntitlementReceipt {
+    if (value.schemaVersion !== 1 || value.firebaseUid !== authUid || value.humanUserId !== humanUserId || value.productScope !== 'WORKOUT_STUDIO') throw new Error('Entitlement projection mismatch');
+    const expiresAtMillis = value.expiryAt?.toMillis?.();
+    const offlineValidUntilMillis = value.offlineReceiptValidUntil?.toMillis?.();
+    if (!Number.isFinite(expiresAtMillis) || !Number.isFinite(offlineValidUntilMillis)) throw new Error('Malformed entitlement expiry');
+    return { schemaVersion: 2, authUid, humanUserId, state: value.normalizedState, source: value.source, expiresAtMillis, offlineValidUntilMillis, introductoryState: value.introductoryState, introductoryExpiredAtMillis: value.introductoryExpiredAt?.toMillis?.() };
   }
 
   private checkValidity(receipt: EntitlementReceipt): Entitlement {
-    if (receipt.state === 'EXPIRED') return { state: 'EXPIRED' };
-    if (receipt.state === 'UNENTITLED') return { state: 'UNENTITLED' };
-
-    const observedNow = Math.max(this.now(), receipt.verifiedServerNowMillis);
-    if (receipt.expiresAtMillis === null || observedNow >= receipt.expiresAtMillis) return { state: 'EXPIRED' };
-    if (observedNow > receipt.offlineValidUntilMillis) return { state: 'VERIFICATION_UNAVAILABLE' };
-    return { state: 'TRIAL_ACTIVE' };
+    const details = { source: receipt.source, expiresAt: new Date(receipt.expiresAtMillis).toISOString(), introductoryState: receipt.introductoryState, introductoryExpiredAt: receipt.introductoryExpiredAtMillis ? new Date(receipt.introductoryExpiredAtMillis).toISOString() : undefined };
+    if (receipt.state !== 'ACTIVE_UNTIL_EXPIRY') return { state: receipt.state, ...details };
+    const now = this.now();
+    if (now >= receipt.expiresAtMillis) return { state: 'EXPIRED', ...details };
+    if (now > receipt.offlineValidUntilMillis) return { state: 'VERIFICATION_UNAVAILABLE', ...details };
+    return { state: 'ACTIVE_UNTIL_EXPIRY', ...details };
   }
 }
 

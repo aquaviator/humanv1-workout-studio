@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Timestamp } from 'firebase/firestore';
 
 const { authMock, cache } = vi.hoisted(() => ({
-  authMock: { currentUser: { uid: 'uid-1', getIdToken: vi.fn(async () => 'token') } },
+  authMock: { currentUser: { uid: 'uid-1' } },
   cache: new Map<string, unknown>()
 }));
 
-vi.mock('../../config/firebase', () => ({ auth: authMock }));
+vi.mock('../../config/firebase', () => ({ auth: authMock, db: {} }));
 vi.mock('idb-keyval', () => ({
   get: vi.fn(async (key: string) => cache.get(key)),
   set: vi.fn(async (key: string, value: unknown) => { cache.set(key, value); })
@@ -13,36 +14,48 @@ vi.mock('idb-keyval', () => ({
 
 import { FirebaseEntitlementRepository } from '../FirebaseEntitlementRepository';
 
-const response = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 503, json: async () => body }) as Response;
+const projection = (overrides: Record<string, unknown> = {}) => ({
+  schemaVersion: 1 as const,
+  firebaseUid: 'uid-1', humanUserId: 'human-1',
+  normalizedState: 'ACTIVE_UNTIL_EXPIRY' as const,
+  productScope: 'WORKOUT_STUDIO' as const, source: 'SUPPORT' as const,
+  expiryAt: Timestamp.fromMillis(10_000),
+  offlineReceiptValidUntil: Timestamp.fromMillis(8_000),
+  introductoryState: 'EXPIRED' as const,
+  introductoryExpiredAt: Timestamp.fromMillis(1_000),
+  ...overrides
+});
 
-describe('FirebaseEntitlementRepository authoritative account trial', () => {
+describe('FirebaseEntitlementRepository current projection', () => {
   beforeEach(() => { cache.clear(); vi.clearAllMocks(); });
 
-  it('maps the Strength backend introductory-access contract', async () => {
-    const fetcher = vi.fn(async () => response({ status: 'ACTIVE', trialStartedAtMillis: 1_000, trialEndsAtMillis: 10_000, serverNowMillis: 2_000 }));
-    const repository = new FirebaseEntitlementRepository(fetcher as typeof fetch, () => 2_000);
-    expect(await repository.getEntitlement('human-1')).toEqual({ state: 'TRIAL_ACTIVE' });
-    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('initializeAccountTrial'), expect.objectContaining({ method: 'POST' }));
+  it('maps an owned, active support projection without restarting introductory access', async () => {
+    const repository = new FirebaseEntitlementRepository(vi.fn(async () => projection()), () => 2_000);
+    expect(await repository.getEntitlement('human-1')).toEqual({
+      state: 'ACTIVE_UNTIL_EXPIRY', source: 'SUPPORT', expiresAt: new Date(10_000).toISOString(),
+      introductoryState: 'EXPIRED', introductoryExpiredAt: new Date(1_000).toISOString()
+    });
   });
 
-  it('preserves consumed introductory access as expired across failed verification', async () => {
-    const online = new FirebaseEntitlementRepository(vi.fn(async () => response({ status: 'EXPIRED', trialStartedAtMillis: 1_000, trialEndsAtMillis: 2_000, serverNowMillis: 3_000 })) as typeof fetch, () => 3_000);
-    expect(await online.getEntitlement('human-1')).toEqual({ state: 'EXPIRED' });
-    const offline = new FirebaseEntitlementRepository(vi.fn(async () => { throw new Error('offline'); }) as typeof fetch, () => 99_000);
-    expect(await offline.getEntitlement('human-1')).toEqual({ state: 'EXPIRED' });
+  it('fails closed for a mismatched owner or product', async () => {
+    const wrongOwner = new FirebaseEntitlementRepository(vi.fn(async () => projection({ firebaseUid: 'other' })), () => 2_000);
+    expect(await wrongOwner.getEntitlement('human-1')).toEqual({ state: 'VERIFICATION_UNAVAILABLE' });
   });
 
-  it('uses a valid cached server receipt offline only within its governed window', async () => {
-    const online = new FirebaseEntitlementRepository(vi.fn(async () => response({ status: 'ACTIVE', trialStartedAtMillis: 1_000, trialEndsAtMillis: 999_999_999, serverNowMillis: 2_000 })) as typeof fetch, () => 2_000);
-    await online.getEntitlement('human-1');
-    const withinWindow = new FirebaseEntitlementRepository(vi.fn(async () => { throw new Error('offline'); }) as typeof fetch, () => 2_000 + 6 * 86_400_000);
-    expect(await withinWindow.getEntitlement('human-1')).toEqual({ state: 'TRIAL_ACTIVE' });
-    const stale = new FirebaseEntitlementRepository(vi.fn(async () => { throw new Error('offline'); }) as typeof fetch, () => 2_000 + 8 * 86_400_000);
-    expect(await stale.getEntitlement('human-1')).toEqual({ state: 'VERIFICATION_UNAVAILABLE' });
+  it('uses the owner-bound cache only inside its governed offline window', async () => {
+    await new FirebaseEntitlementRepository(vi.fn(async () => projection()), () => 2_000).getEntitlement('human-1');
+    const offline = vi.fn(async () => { throw new Error('offline'); });
+    expect((await new FirebaseEntitlementRepository(offline, () => 7_000).getEntitlement('human-1')).state).toBe('ACTIVE_UNTIL_EXPIRY');
+    expect(await new FirebaseEntitlementRepository(offline, () => 9_000).getEntitlement('human-1')).toEqual(expect.objectContaining({ state: 'VERIFICATION_UNAVAILABLE' }));
   });
 
-  it('fails closed when neither backend verification nor an owned receipt exists', async () => {
-    const repository = new FirebaseEntitlementRepository(vi.fn(async () => { throw new Error('offline'); }) as typeof fetch, () => 2_000);
+  it('expires locally only as a fail-closed reduction and never creates access', async () => {
+    const repository = new FirebaseEntitlementRepository(vi.fn(async () => projection()), () => 11_000);
+    expect(await repository.getEntitlement('human-1')).toEqual(expect.objectContaining({ state: 'EXPIRED', introductoryState: 'EXPIRED' }));
+  });
+
+  it('fails closed when no authoritative or cached projection exists', async () => {
+    const repository = new FirebaseEntitlementRepository(vi.fn(async () => { throw new Error('offline'); }), () => 2_000);
     expect(await repository.getEntitlement('human-1')).toEqual({ state: 'VERIFICATION_UNAVAILABLE' });
   });
 });

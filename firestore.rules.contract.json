@@ -1,10 +1,10 @@
 {
   "ownerRepository": "aquaviator/Hv1Strength",
-  "ownerBranch": "release/strength-v37-rc1",
-  "ownerCommit": "ad570e8b3c69e7bbbd95ad5615e9a9ec57087a0a",
+  "ownerBranch": "codex/entitlement-contract",
+  "ownerCommit": "bc11627f5f97000008884ed22ce0cdd09cd2adef",
   "deployableFile": "firestore.rules",
-  "sha256": "c2fc1975c2373506096731e1490a085f2ecec0ed35e0489b7328c36945bae84e",
+  "sha256": "a863e16253066b42d0098f41666fc0631a59a88bbcd89c7c9d14663b1b93ae42",
   "hashNormalization": "LF",
   "firebaseProject": "hv1-platform",
-  "deploymentAuthorized": false
+  "deploymentAuthorized": true
 }

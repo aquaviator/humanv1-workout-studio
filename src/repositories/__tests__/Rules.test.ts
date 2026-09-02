@@ -42,6 +42,11 @@ beforeEach(async () => {
     await setDoc(doc(adminDb, 'accounts', 'auth_2'), { humanUserId: 'human_2', status: 'ACTIVE', schemaVersion: 1 });
     await setDoc(doc(adminDb, 'users', 'human_1'), { ownerFirebaseUid: 'auth_1', status: 'ACTIVE', schemaVersion: 1 });
     await setDoc(doc(adminDb, 'users', 'human_2'), { ownerFirebaseUid: 'auth_2', status: 'ACTIVE', schemaVersion: 1 });
+    await setDoc(doc(adminDb, 'accounts', 'auth_1', 'entitlements', 'current'), {
+      schemaVersion: 1, firebaseUid: 'auth_1', humanUserId: 'human_1',
+      normalizedState: 'ACTIVE_UNTIL_EXPIRY', productScope: 'WORKOUT_STUDIO',
+      expiryAt: new Date('2099-01-01T00:00:00.000Z')
+    });
     
     // Seed catalogue
     await setDoc(doc(adminDb, 'exercise_catalogue', 'current'), { releaseId: 'v1', status: 'published', channel: 'production' });
@@ -50,6 +55,28 @@ beforeEach(async () => {
 });
 
 describe('Firestore Security Rules', () => {
+  it('allows only owner read of current and denies all client entitlement mutations', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
+    const current = doc(alice, 'accounts', 'auth_1', 'entitlements', 'current');
+    await assertSucceeds(getDoc(current));
+    await assertFails(getDoc(doc(bob, 'accounts', 'auth_1', 'entitlements', 'current')));
+    await assertFails(updateDoc(current, { revision: 99 }));
+    await assertFails(setDoc(doc(alice, 'accounts', 'auth_1', 'entitlementGrants', 'grant-1'), { status: 'ACTIVE' }));
+    await assertFails(setDoc(doc(alice, 'accounts', 'auth_1', 'entitlementEvents', 'event-1'), { action: 'GRANT' }));
+  });
+
+  it('fails closed for expired Studio entitlement', async () => {
+    await testEnv.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), 'accounts', 'auth_1', 'entitlements', 'current'), {
+        schemaVersion: 1, firebaseUid: 'auth_1', humanUserId: 'human_1',
+        normalizedState: 'ACTIVE_UNTIL_EXPIRY', productScope: 'WORKOUT_STUDIO',
+        expiryAt: new Date('2020-01-01T00:00:00.000Z')
+      });
+    });
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'workoutDrafts', 'expired'), draft('human_1', 'expired', 1)));
+  });
   it.each([
     ['publishedWorkouts', 'workout'], ['publishedPlans', 'plan'], ['publishedProtocols', 'protocol'],
   ] as const)('allows owner create/read and makes %s immutable', async (collectionName, contentType) => {
