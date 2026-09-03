@@ -37,6 +37,14 @@ describe('FirebaseEntitlementRepository current projection', () => {
     });
   });
 
+  it('accepts a fresh authoritative projection after its offline receipt window while support remains active', async () => {
+    const repository = new FirebaseEntitlementRepository(vi.fn(async () => projection()), () => 9_000);
+    expect(await repository.getEntitlement('human-1')).toEqual({
+      state: 'ACTIVE_UNTIL_EXPIRY', source: 'SUPPORT', expiresAt: new Date(10_000).toISOString(),
+      introductoryState: 'EXPIRED', introductoryExpiredAt: new Date(1_000).toISOString()
+    });
+  });
+
   it('fails closed for a mismatched owner or product', async () => {
     const wrongOwner = new FirebaseEntitlementRepository(vi.fn(async () => projection({ firebaseUid: 'other' })), () => 2_000);
     expect(await wrongOwner.getEntitlement('human-1')).toEqual({ state: 'VERIFICATION_UNAVAILABLE' });

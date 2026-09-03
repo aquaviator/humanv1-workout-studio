@@ -49,8 +49,12 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
     try {
       const receipt = this.toReceipt(await this.loader(user.uid), humanUserId, user.uid);
       await idb.set(this.getCacheKey(humanUserId), receipt);
-      return this.checkValidity(receipt);
-    } catch {
+      return this.checkValidity(receipt, true);
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : 'ENTITLEMENT_VALIDATION_FAILED';
+      console.warn('Entitlement verification unavailable', { code });
       const cached = await idb.get<EntitlementReceipt>(this.getCacheKey(humanUserId));
       if (cached?.schemaVersion === 2 && cached.authUid === user.uid && cached.humanUserId === humanUserId) return this.checkValidity(cached);
       return { state: 'VERIFICATION_UNAVAILABLE' };
@@ -74,12 +78,12 @@ export class FirebaseEntitlementRepository implements EntitlementRepository {
     return { schemaVersion: 2, authUid, humanUserId, state: product.normalizedState, source: product.source, expiresAtMillis, offlineValidUntilMillis, introductoryState: value.introductoryState, introductoryExpiredAtMillis: value.introductoryExpiredAt?.toMillis?.() };
   }
 
-  private checkValidity(receipt: EntitlementReceipt): Entitlement {
+  private checkValidity(receipt: EntitlementReceipt, authoritativeOnline = false): Entitlement {
     const details = { source: receipt.source, expiresAt: new Date(receipt.expiresAtMillis).toISOString(), introductoryState: receipt.introductoryState, introductoryExpiredAt: receipt.introductoryExpiredAtMillis ? new Date(receipt.introductoryExpiredAtMillis).toISOString() : undefined };
     if (receipt.state !== 'ACTIVE_UNTIL_EXPIRY') return { state: receipt.state, ...details };
     const now = this.now();
     if (now >= receipt.expiresAtMillis) return { state: 'EXPIRED', ...details };
-    if (now > receipt.offlineValidUntilMillis) return { state: 'VERIFICATION_UNAVAILABLE', ...details };
+    if (!authoritativeOnline && now > receipt.offlineValidUntilMillis) return { state: 'VERIFICATION_UNAVAILABLE', ...details };
     return { state: 'ACTIVE_UNTIL_EXPIRY', ...details };
   }
 }
