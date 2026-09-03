@@ -8,6 +8,7 @@ import { Entitlement } from "./domain/entitlement";
 import { entitlementRepository } from "./repositories/FirebaseEntitlementRepository";
 import EntitlementGate from "./ui/components/EntitlementGate";
 import { env } from "./config/env";
+import { crossAppRepository } from "./repositories/CrossAppRepository";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
 const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
@@ -80,6 +81,13 @@ export default function App() {
     setEntitlement(null);
     if (!identity) return;
     return entitlementRepository.onEntitlementChanged(identity.humanUserId, setEntitlement);
+  }, [identity]);
+
+  useEffect(() => {
+    if (!identity) return;
+    const replay = () => { void crossAppRepository.replayPending(identity.humanUserId).catch(() => undefined); };
+    window.addEventListener("online", replay); replay();
+    return () => window.removeEventListener("online", replay);
   }, [identity]);
 
   const handleSignIn = async () => {

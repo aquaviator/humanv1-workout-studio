@@ -1,4 +1,4 @@
-import { get, keys, set } from "idb-keyval";
+import { del, get, keys, set } from "idb-keyval";
 import { collection, doc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { Exercise, PrivateExercise } from "../domain/catalogue";
@@ -7,10 +7,14 @@ import { Effort, Plan, PlanPlacement, Workout } from "../domain/types";
 type CloudDoc = Record<string, unknown>;
 type Reader = (owner: string, collectionName: string) => Promise<CloudDoc[]>;
 type Writer = (owner: string, collectionName: string, id: string, value: CloudDoc) => Promise<void>;
+export interface CrossAppConflict { owner: string; collectionName: string; id: string; base: CloudDoc; studio: CloudDoc; app: CloudDoc; resolvedRevision?: number }
+interface PendingWrite { owner: string; collectionName: string; id: string; value: CloudDoc; base: CloudDoc }
 
 const PRIVATE_PREFIX = "private_";
 const clientId = "WORKOUT_STUDIO";
 const localKey = (owner: string, type: string, id: string) => `crossapp_${owner}_${type}_${id}`;
+const pendingKey = (owner: string, collectionName: string, id: string) => `crossapp_pending_${owner}_${collectionName}_${id}`;
+const conflictKey = (owner: string, collectionName: string, id: string) => `crossapp_conflict_${owner}_${collectionName}_${id}`;
 const asNumber = (value: unknown, fallback = 0) => typeof value === "number" ? value : fallback;
 const asString = (value: unknown, fallback = "") => typeof value === "string" ? value : fallback;
 const asStrings = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
@@ -37,8 +41,60 @@ const defaultWrite: Writer = async (owner, collectionName, id, value) => {
   });
 };
 
+export function safeThreeWayMerge(base: CloudDoc, studio: CloudDoc, app: CloudDoc): CloudDoc {
+  const merged: CloudDoc = { ...base };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(studio), ...Object.keys(app)])) {
+    const before = JSON.stringify(base[key]); const studioValue = JSON.stringify(studio[key]); const appValue = JSON.stringify(app[key]);
+    const studioChanged = studioValue !== before; const appChanged = appValue !== before;
+    if (studioChanged && appChanged && studioValue !== appValue) throw new Error(`OVERLAPPING_CONFLICT:${key}`);
+    merged[key] = studioChanged ? studio[key] : appChanged ? app[key] : base[key];
+  }
+  return merged;
+}
+
 export class CrossAppRepository {
   constructor(private read: Reader = defaultRead, private write: Writer = defaultWrite, private online = () => navigator.onLine) {}
+
+  private async durableWrite(owner: string, collectionName: string, id: string, value: CloudDoc, base: CloudDoc = {}): Promise<boolean> {
+    const pending: PendingWrite = { owner, collectionName, id, value, base };
+    await set(pendingKey(owner, collectionName, id), pending);
+    if (!this.online()) return false;
+    try { await this.write(owner, collectionName, id, value); await del(pendingKey(owner, collectionName, id)); return true; }
+    catch (error) {
+      if (error instanceof Error && error.message.includes("REVISION")) {
+        const app = (await this.read(owner, collectionName)).find(item => asString(item.globalId, asString(item.__id)) === id) || {};
+        await set(conflictKey(owner, collectionName, id), { owner, collectionName, id, base, studio: value, app } satisfies CrossAppConflict);
+      }
+      throw error;
+    }
+  }
+
+  async replayPending(owner: string): Promise<number> {
+    if (!this.online()) return 0;
+    let applied = 0;
+    const prefix = `crossapp_pending_${owner}_`;
+    for (const key of (await keys()).filter(key => typeof key === "string" && key.startsWith(prefix))) {
+      const pending = await get<PendingWrite>(key as string); if (!pending || pending.owner !== owner) continue;
+      await this.durableWrite(owner, pending.collectionName, pending.id, pending.value, pending.base); applied++;
+    }
+    return applied;
+  }
+
+  async listConflicts(owner: string): Promise<CrossAppConflict[]> {
+    const prefix = `crossapp_conflict_${owner}_`; const result: CrossAppConflict[] = [];
+    for (const key of (await keys()).filter(key => typeof key === "string" && key.startsWith(prefix))) { const item = await get<CrossAppConflict>(key as string); if (item?.owner === owner && !item.resolvedRevision) result.push(item); }
+    return result;
+  }
+
+  async resolveConflict(conflict: CrossAppConflict, strategy: "KEEP_STUDIO" | "KEEP_APP" | "MERGE"): Promise<void> {
+    const key = conflictKey(conflict.owner, conflict.collectionName, conflict.id);
+    const stored = await get<CrossAppConflict>(key);
+    if (stored?.resolvedRevision) return;
+    const selected = strategy === "KEEP_STUDIO" ? conflict.studio : strategy === "KEEP_APP" ? conflict.app : safeThreeWayMerge(conflict.base, conflict.studio, conflict.app);
+    const revision = Math.max(asNumber(conflict.studio.revision), asNumber(conflict.app.revision)) + 1;
+    await this.write(conflict.owner, conflict.collectionName, conflict.id, { ...selected, globalId: conflict.id, humanUserId: conflict.owner, revision, updatedAt: Date.now() });
+    await set(key, { ...conflict, resolvedRevision: revision }); await del(pendingKey(conflict.owner, conflict.collectionName, conflict.id));
+  }
 
   private assertPrivateId(id: string) {
     if (!id.startsWith(PRIVATE_PREFIX) || !/^private_[a-zA-Z0-9_-]{8,}$/.test(id)) throw new Error("INVALID_PRIVATE_EXERCISE_ID");
@@ -46,7 +102,11 @@ export class CrossAppRepository {
 
   private mapPrivate(owner: string, raw: CloudDoc): PrivateExercise | null {
     const id = asString(raw.globalId, asString(raw.__id));
-    if ((!id.startsWith(PRIVATE_PREFIX) && !id.startsWith("custom_")) || raw.humanUserId !== owner || raw.isCustom !== true) return null;
+    const documentId = asString(raw.__id, id);
+    const sourceLocalId = asString(raw.id);
+    const studioShape = (id.startsWith(PRIVATE_PREFIX) || id.startsWith("custom_")) && sourceLocalId === id;
+    const androidShape = /^exercise_[a-zA-Z0-9_-]{8,}$/.test(id) && /^custom_[a-zA-Z0-9_-]{8,}$/.test(sourceLocalId);
+    if (documentId !== id || (!studioShape && !androidShape) || raw.humanUserId !== owner || raw.isCustom !== true) return null;
     const deletedAt = typeof raw.deletedAt === "number" ? raw.deletedAt : null;
     const capabilities = raw.capabilities as CloudDoc | undefined;
     return {
@@ -62,7 +122,7 @@ export class CrossAppRepository {
       },
       primaryMuscles: asStrings(raw.primaryMuscles), muscleArea: asStrings(raw.muscleArea),
       modalitySuitability: asStrings(raw.modalitySuitability), source: "PRIVATE",
-      provenance: { ownerHumanUserId: owner, originApplication: asString(raw.originApplication, "HUMAN_STRENGTH"), revision: asNumber(raw.revision, 1), schemaVersion: asNumber(raw.schemaVersion, 1), archived: deletedAt !== null },
+      provenance: { ownerHumanUserId: owner, originApplication: asString(raw.originApplication, "HUMAN_STRENGTH"), revision: asNumber(raw.revision, 1), schemaVersion: asNumber(raw.schemaVersion, 1), archived: deletedAt !== null, sourceLocalId },
       createdAt: asNumber(raw.createdAt), updatedAt: asNumber(raw.updatedAt), deletedAt,
       originDeviceId: asString(raw.originDeviceId), syncState: deletedAt ? "Archived" : "Synced",
     };
@@ -84,43 +144,47 @@ export class CrossAppRepository {
 
   async savePrivateExercise(owner: string, input: Partial<PrivateExercise> & Pick<PrivateExercise, "name" | "category" | "metricProfile">): Promise<PrivateExercise> {
     const id = input.exerciseId || `${PRIVATE_PREFIX}${crypto.randomUUID().replaceAll("-", "")}`;
-    this.assertPrivateId(id);
     const existing = await get<PrivateExercise>(localKey(owner, "exercise", id));
+    const sourceLocalId = existing?.provenance.sourceLocalId || input.provenance?.sourceLocalId || id;
+    const importedAndroidRecord = /^exercise_[a-zA-Z0-9_-]{8,}$/.test(id) && /^custom_[a-zA-Z0-9_-]{8,}$/.test(sourceLocalId) && (existing?.provenance.ownerHumanUserId || input.provenance?.ownerHumanUserId) === owner;
+    if (!importedAndroidRecord) this.assertPrivateId(id);
     const now = Date.now();
     const value: PrivateExercise = {
       exerciseId: id, name: input.name.trim(), description: input.description?.trim(), category: input.category,
       equipment: input.equipment || [], aliases: [], metricProfile: input.metricProfile,
       primaryMuscles: input.primaryMuscles || [], muscleArea: input.muscleArea || [], modalitySuitability: input.modalitySuitability || [],
-      source: "PRIVATE", provenance: { ownerHumanUserId: owner, originApplication: clientId, revision: (existing?.provenance.revision || input.provenance?.revision || 0) + 1, schemaVersion: 1, archived: false },
+      source: "PRIVATE", provenance: { ownerHumanUserId: owner, originApplication: clientId, revision: (existing?.provenance.revision || input.provenance?.revision || 0) + 1, schemaVersion: 1, archived: false, sourceLocalId },
       createdAt: existing?.createdAt || now, updatedAt: now, deletedAt: null, originDeviceId: clientId,
       syncState: this.online() ? "Queued" : "Local draft",
     };
     if (!value.name) throw new Error("NAME_REQUIRED");
     await set(localKey(owner, "exercise", id), value);
     const cloud: CloudDoc = {
-      schemaVersion: 1, globalId: id, id, humanUserId: owner, name: value.name, description: value.description || null,
+      schemaVersion: 1, globalId: id, id: sourceLocalId, humanUserId: owner, name: value.name, description: value.description || null,
       category: value.category, equipment: value.equipment, primaryMuscles: value.primaryMuscles || [], muscleArea: value.muscleArea || [],
       modalitySuitability: value.modalitySuitability || [], capabilities: value.metricProfile, isCustom: true,
       createdAt: value.createdAt, updatedAt: value.updatedAt, revision: value.provenance.revision, deletedAt: null,
       originApplication: clientId, originDeviceId: clientId, lastSyncedAt: now,
     };
     if (this.online()) {
-      try { await this.write(owner, "customExercises", id, cloud); value.syncState = "Synced"; }
+      try { await this.durableWrite(owner, "customExercises", id, cloud, existing ? { ...cloud, revision: existing.provenance.revision, updatedAt: existing.updatedAt } : {}); value.syncState = "Synced"; }
       catch (error) { value.syncState = error instanceof Error && error.message.includes("REVISION") ? "Conflict" : "Retry required"; }
       await set(localKey(owner, "exercise", id), value);
-    }
+    } else await this.durableWrite(owner, "customExercises", id, cloud);
     return value;
   }
 
   async setPrivateExerciseArchived(owner: string, id: string, archived: boolean): Promise<PrivateExercise> {
-    this.assertPrivateId(id);
     const current = (await this.listPrivateExercises(owner, true)).find(item => item.exerciseId === id);
     if (!current) throw new Error("PRIVATE_EXERCISE_NOT_FOUND");
+    const sourceLocalId = current.provenance.sourceLocalId || id;
+    const importedAndroidRecord = /^exercise_[a-zA-Z0-9_-]{8,}$/.test(id) && /^custom_[a-zA-Z0-9_-]{8,}$/.test(sourceLocalId) && current.provenance.ownerHumanUserId === owner;
+    if (!importedAndroidRecord) this.assertPrivateId(id);
     const deletedAt = archived ? Date.now() : null;
     const saved: PrivateExercise = { ...current, updatedAt: Date.now(), deletedAt, provenance: { ...current.provenance, revision: current.provenance.revision + 1, archived }, syncState: archived ? "Archived" : (this.online() ? "Queued" : "Local draft") };
     await set(localKey(owner, "exercise", id), saved);
-    const cloud = { schemaVersion: 1, globalId: id, id, humanUserId: owner, name: saved.name, description: saved.description || null, category: saved.category, equipment: saved.equipment, primaryMuscles: saved.primaryMuscles || [], muscleArea: saved.muscleArea || [], modalitySuitability: saved.modalitySuitability || [], capabilities: saved.metricProfile, isCustom: true, createdAt: saved.createdAt, updatedAt: saved.updatedAt, revision: saved.provenance.revision, deletedAt, originApplication: clientId, originDeviceId: clientId, lastSyncedAt: Date.now() };
-    if (this.online()) await this.write(owner, "customExercises", id, cloud);
+    const cloud = { schemaVersion: 1, globalId: id, id: sourceLocalId, humanUserId: owner, name: saved.name, description: saved.description || null, category: saved.category, equipment: saved.equipment, primaryMuscles: saved.primaryMuscles || [], muscleArea: saved.muscleArea || [], modalitySuitability: saved.modalitySuitability || [], capabilities: saved.metricProfile, isCustom: true, createdAt: saved.createdAt, updatedAt: saved.updatedAt, revision: saved.provenance.revision, deletedAt, originApplication: clientId, originDeviceId: clientId, lastSyncedAt: Date.now() };
+    await this.durableWrite(owner, "customExercises", id, cloud);
     return saved;
   }
 
@@ -154,14 +218,14 @@ export class CrossAppRepository {
     const revision = asNumber(existing?.revision) + 1 || 1;
     const exerciseBlocks = workout.blocks.flatMap(block => block.type === "EXERCISE" ? [block] : block.type === "SUPERSET" || block.type === "CIRCUIT" ? block.exercises : []);
     const createdAt = asNumber(existing?.createdAt, now);
-    await this.write(owner, "templates", workout.workoutId, { schemaVersion: 1, globalId: workout.workoutId, name: workout.title, exerciseIdsJson: JSON.stringify(exerciseBlocks.map(block => block.exerciseId)), humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalWorkout: workout } });
+    await this.durableWrite(owner, "templates", workout.workoutId, { schemaVersion: 1, globalId: workout.workoutId, name: workout.title, exerciseIdsJson: JSON.stringify(exerciseBlocks.map(block => block.exerciseId)), humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalWorkout: workout } }, existing || {});
     for (const [position, block] of exerciseBlocks.entries()) {
       const childId = block.blockId;
-      await this.write(owner, "templateExercises", childId, { schemaVersion: 1, globalId: childId, templateId: 0, templateGlobalId: workout.workoutId, exerciseId: block.exerciseId, position, restSeconds: block.efforts[0]?.restAfterSeconds ?? 90, notes: block.notes ?? null, supersetGroupId: null, humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { exerciseNameSnapshot: block.exerciseNameSnapshot } });
+      await this.durableWrite(owner, "templateExercises", childId, { schemaVersion: 1, globalId: childId, templateId: 0, templateGlobalId: workout.workoutId, exerciseId: block.exerciseId, position, restSeconds: block.efforts[0]?.restAfterSeconds ?? 90, notes: block.notes ?? null, supersetGroupId: null, humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { exerciseNameSnapshot: block.exerciseNameSnapshot } });
       for (const [setPosition, effort] of block.efforts.entries()) {
         const setId = effort.effortId;
         const metric = (key: string) => effort.prescriptions.find(item => item.metricKey === key);
-        await this.write(owner, "templateSets", setId, { schemaVersion: 1, globalId: setId, templateExerciseId: 0, templateExerciseGlobalId: childId, position: setPosition + 1, setType: effort.effortType, targetRepsMin: metric("repetitions")?.minimumValue ?? metric("repetitions")?.targetValue ?? null, targetRepsMax: metric("repetitions")?.maximumValue ?? metric("repetitions")?.targetValue ?? null, targetWeight: metric("external_load")?.targetValue ?? null, targetRpe: metric("rpe")?.targetValue ?? null, targetDurationSeconds: metric("duration")?.targetValue ?? null, targetDistance: metric("distance")?.targetValue ?? null, tempo: metric("tempo")?.textValue ?? null, notes: effort.notes ?? null, humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId });
+        await this.durableWrite(owner, "templateSets", setId, { schemaVersion: 1, globalId: setId, templateExerciseId: 0, templateExerciseGlobalId: childId, position: setPosition + 1, setType: effort.effortType, targetRepsMin: metric("repetitions")?.minimumValue ?? metric("repetitions")?.targetValue ?? null, targetRepsMax: metric("repetitions")?.maximumValue ?? metric("repetitions")?.targetValue ?? null, targetWeight: metric("external_load")?.targetValue ?? null, targetRpe: metric("rpe")?.targetValue ?? null, targetDurationSeconds: metric("duration")?.targetValue ?? null, targetDistance: metric("distance")?.targetValue ?? null, tempo: metric("tempo")?.textValue ?? null, notes: effort.notes ?? null, humanUserId: owner, createdAt, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId });
       }
     }
   }
@@ -183,10 +247,10 @@ export class CrossAppRepository {
     const revision = asNumber(existing?.revision) + 1 || 1;
     const placements = plan.weeks.flatMap(week => week.placements);
     const first = placements[0];
-    await this.write(owner, "trainingPlans", plan.planId, { schemaVersion: 1, globalId: plan.planId, humanUserId: owner, templateGlobalId: first?.workoutId || "", routineName: plan.title, firstEpochDay: Math.floor(Date.now() / 86400000), preferredMinuteOfDay: first?.preferredMinuteOfDay ?? null, weekdaysMask: placements.reduce((mask, item) => mask | (1 << Math.max(0, item.dayOfWeek - 1)), 0), recurrenceEndEpochDay: null, createdAt: asNumber(existing?.createdAt, now), updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalPlan: plan } });
+    await this.durableWrite(owner, "trainingPlans", plan.planId, { schemaVersion: 1, globalId: plan.planId, humanUserId: owner, templateGlobalId: first?.workoutId || "", routineName: plan.title, firstEpochDay: Math.floor(Date.now() / 86400000), preferredMinuteOfDay: first?.preferredMinuteOfDay ?? null, weekdaysMask: placements.reduce((mask, item) => mask | (1 << Math.max(0, item.dayOfWeek - 1)), 0), recurrenceEndEpochDay: null, createdAt: asNumber(existing?.createdAt, now), updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalPlan: plan } }, existing || {});
     for (const [weekIndex, week] of plan.weeks.entries()) for (const placement of week.placements) {
       const scheduledEpochDay = Math.floor(Date.now() / 86400000) + weekIndex * 7 + Math.max(0, placement.dayOfWeek - 1);
-      await this.write(owner, "plannedWorkouts", placement.placementId, { schemaVersion: 1, globalId: placement.placementId, humanUserId: owner, seriesId: plan.planId, templateGlobalId: placement.workoutId, routineName: plan.title, scheduledEpochDay, originalEpochDay: scheduledEpochDay, preferredMinuteOfDay: placement.preferredMinuteOfDay, status: "PLANNED", completedAt: null, linkedSessionId: null, reminderEnabled: placement.reminderEnabled, detachedFromSeries: false, createdAt: now, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { workoutVersionId: placement.workoutVersionId, notes: placement.notes } });
+      await this.durableWrite(owner, "plannedWorkouts", placement.placementId, { schemaVersion: 1, globalId: placement.placementId, humanUserId: owner, seriesId: plan.planId, templateGlobalId: placement.workoutId, routineName: plan.title, scheduledEpochDay, originalEpochDay: scheduledEpochDay, preferredMinuteOfDay: placement.preferredMinuteOfDay, status: "PLANNED", completedAt: null, linkedSessionId: null, reminderEnabled: placement.reminderEnabled, detachedFromSeries: false, createdAt: now, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { workoutVersionId: placement.workoutVersionId, notes: placement.notes } });
     }
   }
 }

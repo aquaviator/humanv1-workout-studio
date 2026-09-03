@@ -42,6 +42,8 @@ export interface PrivateExercise extends Exercise {
     revision: number;
     schemaVersion: number;
     archived: boolean;
+    /** Android retains a local custom_* id while its Firestore document uses exercise_*. */
+    sourceLocalId?: string;
   };
   createdAt: number;
   updatedAt: number;
