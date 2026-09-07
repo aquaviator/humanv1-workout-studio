@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blocksPublication, dateFromUnknown, dedupeDiagnostics, formatUserDate, referenceDiagnostic, timestampDiagnostic } from "../presentation";
+import { blocksPublication, dateFromUnknown, dedupeDiagnostics, formatUserDate, publicationBlockReason, referenceDiagnostic, timestampDiagnostic } from "../presentation";
 import { validatePlan } from "../validation/planValidation";
 
 describe("truthful reconstructed-data presentation", () => {
@@ -25,7 +25,12 @@ describe("truthful reconstructed-data presentation", () => {
   it("reuses plan validation for structural publication safety", () => {
     const diagnostic = referenceDiagnostic("workout", "missing", null)!;
     const plan = { schemaVersion: "humanv1.plan/1", planId: "p", title: "Plan", description: "", weeks: [{ weekId: "w", weekNumber: 1, label: "", placements: [] }], reconstructionDiagnostics: [diagnostic] };
-    expect(validatePlan(plan).map(error => error.message)).toContain("Publication is unavailable because an original workout cannot be verified.");
+    expect(validatePlan(plan).map(error => error.message)).toContain("Cannot publish: one workout reference is unavailable");
+  });
+  it("uses distinct, counted publication explanations", () => {
+    expect(publicationBlockReason([referenceDiagnostic("workout", "archived", { deletedAt: 1 })!])).toBe("Cannot publish: one scheduled workout is archived");
+    expect(publicationBlockReason([referenceDiagnostic("workout", "a", null)!, referenceDiagnostic("workout", "b", null)!])).toBe("Cannot publish: 2 workout references are unavailable");
+    expect(publicationBlockReason(timestampDiagnostic(null))).toBeNull();
   });
   it("collapses repeated diagnostics for the same stable reference", () => {
     const diagnostic = referenceDiagnostic("workout", "workout_1", null)!;

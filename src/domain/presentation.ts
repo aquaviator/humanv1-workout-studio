@@ -7,6 +7,7 @@ export interface ReconstructionDiagnostic {
   category: DiagnosticCategory;
   entityType: "workout" | "plan" | "exercise" | "placement" | "set" | "publication" | "timestamp";
   referenceId?: string;
+  displayName?: string;
   reason: string;
   severity: "info" | "warning" | "blocking";
   recommendedAction: string;
@@ -48,7 +49,10 @@ export function timestampDiagnostic(value: unknown): ReconstructionDiagnostic[] 
 export function referenceDiagnostic(entityType: ReconstructionDiagnostic["entityType"], referenceId: string, parent: unknown | { deletedAt?: unknown }): ReconstructionDiagnostic | null {
   if (!referenceId) return { category: "MALFORMED_REFERENCE", entityType, reason: "The original reference is malformed.", severity: "blocking", recommendedAction: "Review the original record before publishing." };
   if (parent && typeof parent === "object") {
-    if ((parent as { deletedAt?: unknown }).deletedAt != null) return { category: "ARCHIVED_PARENT", entityType, referenceId, reason: "The original parent is archived.", severity: "blocking", recommendedAction: "Review the archived parent before publishing." };
+    const record = parent as { deletedAt?: unknown; name?: unknown; title?: unknown };
+    const candidateName = typeof record.name === "string" ? record.name : typeof record.title === "string" ? record.title : undefined;
+    const displayName = candidateName?.trim() || undefined;
+    if (record.deletedAt != null) return { category: "ARCHIVED_PARENT", entityType, referenceId, displayName, reason: "The original parent is archived.", severity: "blocking", recommendedAction: "Review the archived parent before publishing." };
     return null;
   }
   return { category: "MISSING_PARENT", entityType, referenceId, reason: "The original parent is unavailable.", severity: "blocking", recommendedAction: "Restore or verify the original parent before publishing." };
@@ -56,3 +60,13 @@ export function referenceDiagnostic(entityType: ReconstructionDiagnostic["entity
 
 export const blocksPublication = (diagnostics: ReconstructionDiagnostic[] = []) => diagnostics.some(item => item.severity === "blocking");
 export const dedupeDiagnostics = (diagnostics: ReconstructionDiagnostic[]) => [...new Map(diagnostics.map(item => [`${item.category}:${item.entityType}:${item.referenceId ?? ""}`, item])).values()];
+
+export function publicationBlockReason(diagnostics: ReconstructionDiagnostic[] = []): string | null {
+  const blocking = dedupeDiagnostics(diagnostics).filter(item => item.severity === "blocking");
+  if (!blocking.length) return null;
+  const archived = blocking.filter(item => item.category === "ARCHIVED_PARENT").length;
+  const unavailable = blocking.length - archived;
+  if (archived && !unavailable) return `Cannot publish: ${archived === 1 ? "one scheduled workout is" : `${archived} scheduled workouts are`} archived`;
+  if (unavailable && !archived) return `Cannot publish: ${unavailable === 1 ? "one workout reference is" : `${unavailable} workout references are`} unavailable`;
+  return `Cannot publish: ${archived} archived ${archived === 1 ? "workout" : "workouts"} and ${unavailable} unavailable ${unavailable === 1 ? "reference" : "references"}`;
+}

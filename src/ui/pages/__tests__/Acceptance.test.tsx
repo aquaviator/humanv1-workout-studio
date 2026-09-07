@@ -194,6 +194,29 @@ describe('Acceptance Criteria', () => {
       render(<MemoryRouter initialEntries={['/plans/plan_two_week_fixture']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={mockIdentity} />} /></Routes></MemoryRouter>);
       await screen.findByDisplayValue('My Epic Plan');
     });
+
+    it('shows an affected placement and associates the specific publication block without saving', async () => {
+      const affected = {
+        schemaVersion: 'humanv1.plan/1', planId: 'affected-plan', title: 'Affected Plan', description: '',
+        weeks: [{ weekId: 'week-safe', weekNumber: 1, label: 'Week 1', placements: [{ placementId: 'placement-safe', dayOfWeek: 1, workoutId: 'archived-workout', workoutVersionId: 'editable:archived-workout', preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] }],
+        reconstructionDiagnostics: [{ category: 'ARCHIVED_PARENT', entityType: 'workout', referenceId: 'archived-workout', reason: 'The original parent is archived.', severity: 'blocking', recommendedAction: 'Review the archived parent before publishing.' }],
+      };
+      await draftRepository.savePlanDraft('test-user', affected as any);
+      const draftKey = 'drafts_test-user_plan_affected-plan';
+      const before = structuredClone(mockDbStore.get(draftKey));
+      const { container } = render(<MemoryRouter initialEntries={['/plans/affected-plan']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={mockIdentity} />} /></Routes></MemoryRouter>);
+      await screen.findByDisplayValue('Affected Plan');
+      const send = screen.getByRole('button', { name: /send plan to my apps/i });
+      expect(send).toBeDisabled();
+      expect(send).toHaveAttribute('aria-describedby', 'plan-publication-reason');
+      expect(screen.getByText('Cannot publish: one scheduled workout is archived.')).toHaveAttribute('id', 'plan-publication-reason');
+      expect(screen.getByLabelText('Reconstruction status for Week 1, Monday, placement placement-safe')).toHaveTextContent('publication blocked');
+      expect(screen.getByRole('button', { name: 'Remove workout' })).toBeDisabled();
+      await new Promise(resolve => setTimeout(resolve, 600));
+      expect(mockDbStore.get(draftKey)).toEqual(before);
+      expect(container.scrollWidth).toBeLessThanOrEqual(container.clientWidth || container.scrollWidth);
+      expect(await axe(container)).toHaveNoViolations();
+    });
   });
 });
 

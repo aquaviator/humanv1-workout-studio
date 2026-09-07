@@ -16,6 +16,8 @@ import { Send } from "lucide-react";
 import { validatePlan } from "../../domain/validation/planValidation";
 import { AlertCircle } from "lucide-react";
 import { crossAppRepository } from "../../repositories/CrossAppRepository";
+import { PlanReconstructionStatus, PlacementReconstructionStatus } from "../components/PlanReconstructionStatus";
+import { publicationBlockReason } from "../../domain/presentation";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
@@ -51,6 +53,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
   const validationErrors = React.useMemo(() => validatePlan(plan), [plan]);
+  const publicationReason = React.useMemo(() => publicationBlockReason(plan.reconstructionDiagnostics), [plan.reconstructionDiagnostics]);
 
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -230,6 +233,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       
       const movedItemIndex = sourcePlacements.findIndex(p => p.placementId === result.draggableId);
       if (movedItemIndex >= 0) {
+        const candidate = sourcePlacements[movedItemIndex];
+        if ((plan.reconstructionDiagnostics ?? []).some(item => item.severity === "blocking" && (item.referenceId ? item.referenceId === candidate.workoutId : !candidate.workoutId))) return;
         const [movedItem] = sourcePlacements.splice(movedItemIndex, 1);
         movedItem.dayOfWeek = destDay;
         sourcePlacements.push(movedItem);
@@ -295,7 +300,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
           </button>
-          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} title={validationErrors.length ? validationErrors[0].message : undefined} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} aria-describedby={publicationReason ? "plan-publication-reason" : undefined} title={validationErrors.length ? validationErrors[0].message : undefined} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
             <Send className="w-4 h-4" /> Send plan to my apps
           </button>
       {isPublishModalOpen && (
@@ -324,6 +329,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       )}
         </div>
       </div>
+      <PlanReconstructionStatus plan={plan} />
       
       <div className="px-4 md:px-8 border-b border-hv-border flex items-center justify-between py-2">
         <div className="flex gap-2">
@@ -384,10 +390,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                         >
                           {placements.map((p, pIdx) => {
                             const workout = availableWorkouts.find(w => w.workoutId === p.workoutId);
-                            if (!workout) return null;
+                            const unresolved = (plan.reconstructionDiagnostics ?? []).some(item => item.severity === "blocking" && (item.referenceId ? item.referenceId === p.workoutId : !p.workoutId));
                             
                             return (
-                              <Draggable key={p.placementId} draggableId={p.placementId} index={pIdx}>
+                              <Draggable key={p.placementId} draggableId={p.placementId} index={pIdx} isDragDisabled={unresolved}>
                                 {(provided) => (
                                   <div
                                     ref={provided.innerRef}
@@ -395,10 +401,13 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                                     {...provided.dragHandleProps}
                                     className="bg-hv-bg border border-hv-border p-3 rounded-md text-sm group relative"
                                   >
-                                    <div className="font-semibold mb-1 line-clamp-1 pr-6">{workout.title}</div>
-                                    <div className="text-xs text-hv-text-muted">{workout.discipline}</div>
+                                    <div className="font-semibold mb-1 line-clamp-1 pr-6">{workout?.title || "Workout unavailable"}</div>
+                                    <div className="text-xs text-hv-text-muted">{workout?.discipline || "Reconstructed placement"}</div>
+                                    <PlacementReconstructionStatus placement={p} weekLabel={plan.weeks[activeWeekIndex].label} dayLabel={format(day, 'EEEE')} workout={workout} diagnostics={plan.reconstructionDiagnostics ?? []} />
                                     <button 
                                       onClick={() => removePlacement(p.placementId)}
+                                      disabled={unresolved}
+                                      title={unresolved ? "Resolve the workout reference before removing this placement" : undefined}
                                       className="absolute top-2 right-2 text-hv-text-muted hover:text-hv-error opacity-0 group-hover:opacity-100 focus:opacity-100"
                                       aria-label="Remove workout"
                                     >
