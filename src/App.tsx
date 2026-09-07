@@ -36,9 +36,9 @@ function Navigation() {
   ];
 
   return (
-    <nav className="w-64 border-r border-hv-border bg-hv-surface-1 flex flex-col">
-      <div className="p-6">
-        <h2 className="text-xl font-bold tracking-tight">Workout Studio</h2>
+    <nav className="w-16 md:w-64 shrink-0 border-r border-hv-border bg-hv-surface-1 flex flex-col">
+      <div className="px-2 py-6 md:p-6 text-center md:text-left">
+        <h2 className="text-xl font-bold tracking-tight"><span className="md:hidden" aria-hidden="true">WS</span><span className="hidden md:inline">Workout Studio</span></h2>
       </div>
       <div className="flex-1 px-4 space-y-2">
         {navItems.map((item) => {
@@ -47,15 +47,16 @@ function Navigation() {
             <Link
               key={item.path}
               to={item.path}
+              aria-label={item.label}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+                "flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md transition-colors",
                 isActive 
                   ? "bg-hv-primary/10 text-hv-primary font-medium" 
                   : "text-hv-text-muted hover:text-hv-text hover:bg-hv-surface-2"
               )}
             >
               <item.icon className="w-5 h-5" />
-              {item.label}
+              <span className="hidden md:inline">{item.label}</span>
             </Link>
           );
         })}
