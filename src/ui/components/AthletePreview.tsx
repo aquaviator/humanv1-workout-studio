@@ -1,8 +1,10 @@
 import React from 'react';
 import { Workout, Block, ExerciseBlock, CircuitBlock, SupersetBlock, RestBlock } from "../../domain/types";
 import { Exercise } from "../../domain/catalogue";
+import { DeliveryPresentation } from '../../domain/deliveryPresentation';
+import { WorkoutDeliveryStatus } from './WorkoutDeliveryStatus';
 
-export function AthletePreview({ workout, catalogue }: { workout: Workout; catalogue: Exercise[] }) {
+export function AthletePreview({ workout, catalogue, delivery = null }: { workout: Workout; catalogue: Exercise[]; delivery?: DeliveryPresentation | null }) {
   let stepCounter = 1;
 
   const renderPrescriptions = (efforts: any[]) => {
@@ -33,6 +35,7 @@ export function AthletePreview({ workout, catalogue }: { workout: Workout; catal
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto py-8">
+      <WorkoutDeliveryStatus delivery={delivery} />
       <div className="mb-8 border-b border-hv-border pb-4">
         <h2 className="text-3xl font-bold">{workout.title}</h2>
         <div className="text-hv-text-muted text-sm mt-2">Discipline: {workout.discipline}</div>

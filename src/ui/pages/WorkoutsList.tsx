@@ -10,6 +10,8 @@ import { Trash2, Copy, Edit2, RotateCcw, Search, Clock, SortAsc, Archive } from 
 import { cn } from "../../lib/utils";
 import { dateFromUnknown, formatUserDate } from "../../domain/presentation";
 import ReconstructionDiagnostics from "../components/ReconstructionDiagnostics";
+import { presentWorkoutDelivery } from '../../domain/deliveryPresentation';
+import { WorkoutDeliveryStatus } from '../components/WorkoutDeliveryStatus';
 
 export default function WorkoutsList({ identity }: { identity: HumanIdentity }) {
   const navigate = useNavigate();
@@ -163,9 +165,9 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
         {filtered.map(item => {
           const workout = item.workout;
           const env = item.draft;
-          const statusText = item.state === "DOWNLOADED" ? "Downloaded by Human Strength" :
-            item.state === "SENT" ? "Sent to your apps" : item.state === "RETRY_REQUIRED" ? "Retry required" :
-            item.state.charAt(0) + item.state.slice(1).toLowerCase();
+          const reconstructedSync = item.syncRecord ?? (item.latestVersion ? { syncType: 'publication' as const, envelope: item.latestVersion, status: 'SYNCED' as const, type: 'workout' as const, acknowledgedRevision: item.latestVersion.revision } : null);
+          const delivery = presentWorkoutDelivery({ workout, syncRecord: reconstructedSync, acknowledgements: item.acknowledgements, online: !offline, latestRevision: item.latestVersion?.revision });
+          const statusText = delivery?.title ?? (item.state === 'DRAFT' ? 'Draft' : 'Delivery status unavailable');
           return (
             <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
               <div className="flex justify-between items-start mb-2">
@@ -223,6 +225,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                 </span>
               </div>
               <ReconstructionDiagnostics diagnostics={item.diagnostics} />
+              <div className="mt-3"><WorkoutDeliveryStatus delivery={delivery} /></div>
             </div>
           );
         })}

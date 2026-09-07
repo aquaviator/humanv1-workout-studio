@@ -19,6 +19,7 @@ export interface WorkoutLibraryItem {
   latestVersion: PublishedEnvelope<Workout> | null;
   acknowledgement: DeliveryAcknowledgement | null;
   acknowledgements: DeliveryAcknowledgement[];
+  syncRecord: SyncRecord | null;
   state: WorkoutLibraryState;
   updatedAt: string;
   diagnostics: ReconstructionDiagnostic[];
@@ -121,6 +122,7 @@ export class WorkoutLibraryRepository {
         acknowledgement,
         acknowledgements: acknowledgements.filter(ack => ack.workoutGlobalId === globalId && versions.some(version =>
           version.versionId === ack.versionId && version.contentChecksum === ack.appliedChecksum)),
+        syncRecord: sync ?? null,
         state,
         updatedAt,
         diagnostics: [...(workout.reconstructionDiagnostics ?? []), ...timestampDiagnostic(updatedAt)],

@@ -1,7 +1,7 @@
 import { PublishedEnvelope } from "../../domain/publication";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams } from "react-router";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { v4 as uuidv4 } from "uuid";
 import { Workout, Block, ExerciseBlock, Effort, MetricPrescription } from "../../domain/types";
@@ -18,6 +18,12 @@ import { publicationRepository } from "../../repositories/PublicationRepository"
 import { Send } from "lucide-react";
 import { deliveryAcknowledgementRepository, DeliveryAcknowledgement } from "../../repositories/DeliveryAcknowledgementRepository";
 import { crossAppRepository, markCatalogueSource } from "../../repositories/CrossAppRepository";
+import { compatibleDestinations, presentWorkoutDelivery } from '../../domain/deliveryPresentation';
+import { WorkoutDeliveryStatus } from '../components/WorkoutDeliveryStatus';
+
+function exerciseCount(blocks: Block[]) {
+  return blocks.reduce((total, block) => total + (block.type === 'EXERCISE' ? 1 : block.type === 'SUPERSET' || block.type === 'CIRCUIT' ? block.exercises.length : 0), 0);
+}
 
 export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }) {
   const { workoutId: routeWorkoutId } = useParams<{ workoutId: string }>();
@@ -46,7 +52,14 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [activeTab, setActiveTab] = useState<'builder' | 'preview'>('builder');
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
-  const [delivery, setDelivery] = useState<DeliveryAcknowledgement | null>(null);
+  const [deliveries, setDeliveries] = useState<DeliveryAcknowledgement[]>([]);
+  const [publishedVersions, setPublishedVersions] = useState<PublishedEnvelope<Workout>[]>([]);
+  const [transientPhase, setTransientPhase] = useState<'VALIDATING' | 'PREPARING' | null>(null);
+  const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
+  const publishingRef = useRef(false);
+  const publishButtonRef = useRef<HTMLButtonElement>(null);
+  const continueButtonRef = useRef<HTMLButtonElement>(null);
+  const [identicalVersion, setIdenticalVersion] = useState<PublishedEnvelope<Workout> | null>(null);
 
   useEffect(() => {
     if (routeWorkoutId || workout.catalogueReleaseId !== "catalogue_release_pending") return;
@@ -61,10 +74,12 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       const record = records.filter(r => (r.envelope as PublishedEnvelope<Workout>).sourceDraftId === workout.workoutId)
         .sort((a, b) => (b.envelope as PublishedEnvelope<Workout>).revision - (a.envelope as PublishedEnvelope<Workout>).revision)[0];
       setSyncRecord(record || null);
-      if (record?.status === 'SYNCED') {
-        const latest = (await deliveryAcknowledgementRepository.listForWorkout(identity.humanUserId, workout.workoutId))[0];
-        setDelivery(latest || null);
-      } else setDelivery(null);
+      const [acks, versions] = await Promise.all([
+        deliveryAcknowledgementRepository.listForWorkout(identity.humanUserId, workout.workoutId).catch(() => []),
+        publicationRepository.listPublishedVersions<Workout>(identity.humanUserId, 'workout', workout.workoutId),
+      ]);
+      setDeliveries(acks);
+      setPublishedVersions(versions);
     };
     fetchStatus();
     const unsub = syncManager.subscribe(fetchStatus);
@@ -72,21 +87,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     return () => { unsub(); clearInterval(interval); };
   }, [workout.workoutId, identity.humanUserId]);
   
-  const publishStatus = useMemo(() => {
-    if (!syncRecord) return "Ready";
-    switch (syncRecord.status) {
-      case 'QUEUED': return "Queued—will send when connected";
-      case 'SENDING': return "Sending";
-      case 'SYNCED':
-        if (delivery?.state === 'APPLIED') return "Downloaded by Human Strength";
-        if (delivery?.state === 'CONFLICT') return `Human Strength conflict${delivery.reasonCode ? `: ${delivery.reasonCode}` : ''}`;
-        if (delivery?.state === 'REJECTED') return `Human Strength rejected${delivery.reasonCode ? `: ${delivery.reasonCode}` : ''}`;
-        return "Available in your apps";
-      case 'CONFLICT': return "Conflict";
-      case 'FAILED': return "Retry required";
-      default: return "";
-    }
-  }, [syncRecord, delivery]);
+  const deliveryPresentation = useMemo(() => presentWorkoutDelivery({ workout, syncRecord, acknowledgements: deliveries, online: navigator.onLine, latestRevision: publishedVersions[0]?.revision, transientPhase }), [workout, syncRecord, deliveries, publishedVersions, transientPhase]);
 
 
   const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);
@@ -125,13 +126,57 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   }, [workout, identity.humanUserId, isLoading, validationErrors.length]);
 
   const handlePublish = async () => {
+    if (publishingRef.current) return;
+    publishingRef.current = true;
+    setIsPublishModalOpen(false);
+    setTransientPhase('VALIDATING');
+    setNotice({ key: `validating-${workout.workoutId}`, message: 'Checking your workout…' });
     try {
-      await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
-      setIsPublishModalOpen(false);
+      if (validationErrors.length) return;
+      setTransientPhase('PREPARING');
+      setNotice({ key: `preparing-${workout.workoutId}`, message: 'Preparing version…' });
+      const envelope = await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
+      setNotice({ key: `queued-${envelope.versionId}`, message: navigator.onLine ? 'Saved and queued' : 'Queued — will send when connected' });
     } catch (error: unknown) {
       console.warn("Failed to publish", error instanceof Error ? error.message : 'Publication failed');
+      setNotice({ key: `failed-${workout.workoutId}`, message: 'Workout could not be queued. Your draft is safe.' });
+    } finally {
+      setTransientPhase(null);
+      publishingRef.current = false;
     }
   };
+
+  const closePublishDialog = () => { setIsPublishModalOpen(false); requestAnimationFrame(() => publishButtonRef.current?.focus()); };
+  const openPublishDialog = async () => {
+    if (validationErrors.length || publishingRef.current) return;
+    const checksum = await publicationRepository.generateChecksum(workout);
+    setIdenticalVersion(publishedVersions.find(version => version.contentChecksum === checksum) ?? null);
+    setIsPublishModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!isPublishModalOpen) return;
+    continueButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closePublishDialog(); }
+      if (event.key === 'Tab') {
+        const focusable = [continueButtonRef.current, document.getElementById('confirm-send-workout')].filter(Boolean) as HTMLElement[];
+        const index = focusable.indexOf(document.activeElement as HTMLElement);
+        if (event.shiftKey && index <= 0) { event.preventDefault(); focusable.at(-1)?.focus(); }
+        else if (!event.shiftKey && index === focusable.length - 1) { event.preventDefault(); focusable[0]?.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isPublishModalOpen]);
+
+  useEffect(() => {
+    if (!deliveryPresentation?.versionId || !['SENT_TO_HUMANV1', 'AVAILABLE_IN_APPS', 'PARTIALLY_DELIVERED', 'CONFLICT', 'RETRY_REQUIRED'].includes(deliveryPresentation.phase)) return;
+    const key = `delivery_notice_seen_${identity.humanUserId}_${deliveryPresentation.versionId}_${deliveryPresentation.phase}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+    setNotice({ key, message: deliveryPresentation.title });
+  }, [deliveryPresentation, identity.humanUserId]);
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
 
@@ -441,25 +486,33 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
             <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
               <Redo2 className="w-5 h-5" />
             </button>
-            <button 
-    onClick={() => setIsPublishModalOpen(true)}
-    disabled={validationErrors.length > 0}
+            <button ref={publishButtonRef}
+    onClick={() => void openPublishDialog()}
+    disabled={validationErrors.length > 0 || transientPhase !== null}
     className={`px-4 py-2 rounded-md font-medium ${validationErrors.length > 0 ? 'bg-hv-surface-2 text-hv-text-muted cursor-not-allowed' : 'bg-hv-primary text-hv-background hover:bg-hv-primary-hover'}`}
 >
-    Publish
+    Send to my apps
 </button>
 {isPublishModalOpen && (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-hv-surface-1 p-6 rounded-lg w-[400px]">
-            <h2 className="text-xl font-bold mb-4 text-hv-text">Send workout to my apps</h2>
-            <div className="space-y-3 mb-6 text-hv-text-muted">
-                <p><span className="font-semibold text-hv-text">Discipline:</span> {workout.discipline}</p>
-                <p><span className="font-semibold text-hv-text">Blocks:</span> {workout.blocks.length}</p>
-            </div>
-            {publishStatus && publishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{publishStatus}</p>}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closePublishDialog(); }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="send-dialog-title" aria-describedby="send-dialog-description" className="bg-hv-surface-1 p-6 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <h2 id="send-dialog-title" className="text-xl font-bold mb-2 text-hv-text">Send to my apps</h2>
+            <p id="send-dialog-description" className="mb-4 text-sm text-hv-text-muted">Review the immutable version that will be sent.</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 mb-4 text-sm">
+                <dt className="font-semibold">Workout</dt><dd>{workout.title}</dd>
+                <dt className="font-semibold">Discipline</dt><dd>{workout.discipline}</dd>
+                <dt className="font-semibold">Ordered blocks</dt><dd>{workout.blocks.length}</dd>
+                <dt className="font-semibold">Exercises</dt><dd>{exerciseCount(workout.blocks)}</dd>
+                <dt className="font-semibold">Catalogue release</dt><dd className="break-all">{workout.catalogueReleaseId}</dd>
+                <dt className="font-semibold">Draft revision</dt><dd>{publishedVersions[0] ? `After published revision ${publishedVersions[0].revision}` : 'First publication'}</dd>
+                <dt className="font-semibold">Destinations</dt><dd>{compatibleDestinations(workout).map(item => item.label).join(', ') || 'Any compatible HumanV1 app'}</dd>
+                <dt className="font-semibold">Connection</dt><dd>{navigator.onLine ? 'Online' : 'Offline — safely queue on this device'}</dd>
+            </dl>
+            <p className="mb-3 text-sm">{identicalVersion ? `This content already exists as revision ${identicalVersion.revision}; sending again will reuse it without creating a duplicate.` : publishedVersions.length ? 'This creates a new immutable version.' : 'This creates the first immutable version.'}</p>
+            <p className="mb-6 text-sm text-hv-text-muted">Your draft remains editable. Existing published versions are preserved.</p>
             <div className="flex justify-end gap-3">
-                <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
-                <button onClick={handlePublish} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
+                <button ref={continueButtonRef} onClick={closePublishDialog} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Continue editing</button>
+                <button id="confirm-send-workout" onClick={handlePublish} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send to my apps</button>
             </div>
         </div>
     </div>
@@ -504,8 +557,11 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           </div>
         )}
 
+        {notice && <div role="status" aria-live="polite" className="mb-4 flex items-center justify-between rounded-lg border border-hv-primary bg-hv-surface-1 p-3 text-sm"><span>{notice.message}</span><button aria-label="Dismiss delivery notification" onClick={() => setNotice(null)} className="rounded px-2 py-1">Dismiss</button></div>}
+        {activeTab === 'builder' && <WorkoutDeliveryStatus delivery={deliveryPresentation} onRetry={() => void syncManager.syncPending()} />}
+
         {activeTab === 'preview' ? (
-          <AthletePreview workout={workout} catalogue={exercisesData} />
+          <AthletePreview workout={workout} catalogue={exercisesData} delivery={deliveryPresentation} />
         ) : (
           <>
             <DragDropContext onDragEnd={onDragEnd}>
