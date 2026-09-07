@@ -8,6 +8,8 @@ import { workoutLibraryRepository, WorkoutLibraryItem } from "../../repositories
 import { v4 as uuidv4 } from "uuid";
 import { Trash2, Copy, Edit2, RotateCcw, Search, Clock, SortAsc, Archive } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { dateFromUnknown, formatUserDate } from "../../domain/presentation";
+import ReconstructionDiagnostics from "../components/ReconstructionDiagnostics";
 
 export default function WorkoutsList({ identity }: { identity: HumanIdentity }) {
   const navigate = useNavigate();
@@ -98,7 +100,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
   });
 
   filtered.sort((a, b) => {
-    if (sortBy === "updatedAt") return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    if (sortBy === "updatedAt") return (dateFromUnknown(b.updatedAt)?.getTime() ?? -Infinity) - (dateFromUnknown(a.updatedAt)?.getTime() ?? -Infinity);
     if (sortBy === "title") return a.workout.title.localeCompare(b.workout.title);
     if (sortBy === "duration") return (b.workout.estimatedDurationSeconds || 0) - (a.workout.estimatedDurationSeconds || 0);
     return 0;
@@ -209,7 +211,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
               </p>
               <div className="flex justify-between items-center mt-2 border-t border-hv-border pt-2 text-xs">
                 <span className="text-hv-text-muted">
-                  Updated {new Date(item.updatedAt).toLocaleDateString()}
+                  Updated {formatUserDate(item.updatedAt)}
                 </span>
                 <span className={cn(
                   "font-medium",
@@ -220,6 +222,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                   {statusText}
                 </span>
               </div>
+              <ReconstructionDiagnostics diagnostics={item.diagnostics} />
             </div>
           );
         })}

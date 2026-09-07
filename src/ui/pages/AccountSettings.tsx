@@ -4,6 +4,7 @@ import { Entitlement } from "../../domain/entitlement";
 import { entitlementRepository } from "../../repositories/FirebaseEntitlementRepository";
 import { authRepository } from "../../repositories/AuthManager";
 import { LogOut } from "lucide-react";
+import { formatUserDate } from "../../domain/presentation";
 
 export default function AccountSettings({ identity }: { identity: HumanIdentity }) {
   const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
@@ -27,12 +28,12 @@ export default function AccountSettings({ identity }: { identity: HumanIdentity 
         <div className="mb-4">
           <div className="text-sm text-hv-text-muted">Workout Studio access</div>
           <div>{entitlement ? entitlement.state : "LOADING..."}</div>
-          {entitlement?.expiresAt && <div className="text-sm text-hv-text-muted">Until {new Date(entitlement.expiresAt).toLocaleString()}</div>}
+          {entitlement?.expiresAt && <div className="text-sm text-hv-text-muted">Until {formatUserDate(entitlement.expiresAt, true)}</div>}
         </div>
         <div className="mb-4">
           <div className="text-sm text-hv-text-muted">Introductory access</div>
           <div>{entitlement?.introductoryState ?? "NOT REPORTED"}</div>
-          {entitlement?.introductoryExpiredAt && <div className="text-sm text-hv-text-muted">Ended {new Date(entitlement.introductoryExpiredAt).toLocaleString()}</div>}
+          {entitlement?.introductoryExpiredAt && <div className="text-sm text-hv-text-muted">Ended {formatUserDate(entitlement.introductoryExpiredAt, true)}</div>}
         </div>
         <div className="mb-8">
           <div className="text-sm text-hv-text-muted">User ID</div>

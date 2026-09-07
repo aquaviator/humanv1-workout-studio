@@ -3,6 +3,7 @@ import { collection, doc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { Exercise, PrivateExercise } from "../domain/catalogue";
 import { Effort, Plan, PlanPlacement, Workout } from "../domain/types";
+import { dedupeDiagnostics, ReconstructionDiagnostic, referenceDiagnostic } from "../domain/presentation";
 
 type CloudDoc = Record<string, unknown>;
 type Reader = (owner: string, collectionName: string) => Promise<CloudDoc[]>;
@@ -190,13 +191,24 @@ export class CrossAppRepository {
 
   async listAppWorkouts(owner: string): Promise<Workout[]> {
     if (!this.online()) return [];
-    const [templates, exercises, sets] = await Promise.all([this.read(owner, "templates"), this.read(owner, "templateExercises"), this.read(owner, "templateSets")]);
+    const [templates, exercises, sets, privateExercises] = await Promise.all([this.read(owner, "templates"), this.read(owner, "templateExercises"), this.read(owner, "templateSets"), this.read(owner, "customExercises")]);
     return templates.filter(t => t.humanUserId === owner && t.deletedAt == null).map(template => {
       const templateId = asString(template.globalId, asString(template.__id));
       const children = exercises.filter(item => item.humanUserId === owner && item.templateGlobalId === templateId && item.deletedAt == null).sort((a, b) => asNumber(a.position) - asNumber(b.position));
+      const diagnostics: ReconstructionDiagnostic[] = [];
+      for (const child of children) {
+        const exerciseId = asString(child.exerciseId);
+        if (!exerciseId) diagnostics.push({ category: "MALFORMED_REFERENCE", entityType: "exercise", reason: "An exercise reference is malformed.", severity: "blocking", recommendedAction: "Review the original workout before publishing." });
+        else if (exerciseId.startsWith("private_") || exerciseId.startsWith("custom_") || exerciseId.startsWith("exercise_")) {
+          const parent = privateExercises.find(item => asString(item.globalId, asString(item.__id)) === exerciseId);
+          const diagnostic = referenceDiagnostic("exercise", exerciseId, parent);
+          if (diagnostic) diagnostics.push({ ...diagnostic, category: diagnostic.category === "MISSING_PARENT" ? "MISSING_EXERCISE" : diagnostic.category });
+        }
+      }
       return {
         schemaVersion: "humanv1.workout/1", workoutId: templateId, title: asString(template.name, "Workout"), discipline: "STRENGTH" as const,
         catalogueReleaseId: "cross_app", tags: ["HUMAN_STRENGTH"],
+        reconstructionDiagnostics: dedupeDiagnostics(diagnostics),
         blocks: children.map(child => {
           const childId = asString(child.globalId, asString(child.__id));
           const childSets = sets.filter(item => item.humanUserId === owner && item.templateExerciseGlobalId === childId && item.deletedAt == null).sort((a, b) => asNumber(a.position) - asNumber(b.position));
@@ -232,12 +244,17 @@ export class CrossAppRepository {
 
   async listAppPlans(owner: string): Promise<Plan[]> {
     if (!this.online()) return [];
-    const [plans, occurrences] = await Promise.all([this.read(owner, "trainingPlans"), this.read(owner, "plannedWorkouts")]);
+    const [plans, occurrences, templates] = await Promise.all([this.read(owner, "trainingPlans"), this.read(owner, "plannedWorkouts"), this.read(owner, "templates")]);
     return plans.filter(p => p.humanUserId === owner && p.deletedAt == null).map(raw => {
       const id = asString(raw.globalId, asString(raw.__id));
       const linked = occurrences.filter(item => item.humanUserId === owner && item.seriesId === id && item.deletedAt == null);
       const placements: PlanPlacement[] = linked.map(item => ({ placementId: asString(item.globalId, asString(item.__id)), dayOfWeek: ((asNumber(item.scheduledEpochDay) + 3) % 7) + 1, workoutId: asString(item.templateGlobalId), workoutVersionId: asString((item.extensions as CloudDoc)?.workoutVersionId, `editable:${asString(item.templateGlobalId)}`), preferredMinuteOfDay: typeof item.preferredMinuteOfDay === "number" ? item.preferredMinuteOfDay : null, reminderEnabled: item.reminderEnabled === true, notes: asString((item.extensions as CloudDoc)?.notes) }));
-      return { schemaVersion: "humanv1.plan/1", planId: id, title: asString(raw.routineName, "Plan"), description: "Synced from Human Strength", weeks: [{ weekId: `${id}_week_1`, weekNumber: 1, label: "Schedule", placements }] };
+      const diagnostics = linked.map(item => {
+        const referenceId = asString(item.templateGlobalId);
+        const parent = templates.find(template => asString(template.globalId, asString(template.__id)) === referenceId);
+        return referenceDiagnostic("workout", referenceId, parent);
+      }).filter((item): item is ReconstructionDiagnostic => item !== null);
+      return { schemaVersion: "humanv1.plan/1", planId: id, title: asString(raw.routineName, "Plan"), description: "Synced from Human Strength", reconstructionDiagnostics: dedupeDiagnostics(diagnostics), weeks: [{ weekId: `${id}_week_1`, weekNumber: 1, label: "Schedule", placements }] };
     });
   }
 

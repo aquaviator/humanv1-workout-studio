@@ -295,7 +295,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
           </button>
-          <button onClick={handleOpenPublish} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2">
+          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} title={validationErrors.length ? validationErrors[0].message : undefined} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
             <Send className="w-4 h-4" /> Send plan to my apps
           </button>
       {isPublishModalOpen && (

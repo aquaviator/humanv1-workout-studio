@@ -7,6 +7,7 @@ import { DeliveryAcknowledgement, deliveryAcknowledgementRepository } from './De
 import { DraftEnvelope, draftRepository } from './DraftRepository';
 import { SyncRecord, syncManager } from './SyncManager';
 import { crossAppRepository } from './CrossAppRepository';
+import { ReconstructionDiagnostic, timestampDiagnostic } from '../domain/presentation';
 
 export type WorkoutLibraryState = 'DRAFT' | 'QUEUED' | 'SENT' | 'DOWNLOADED' | 'CONFLICT' | 'RETRY_REQUIRED';
 
@@ -20,6 +21,7 @@ export interface WorkoutLibraryItem {
   acknowledgements: DeliveryAcknowledgement[];
   state: WorkoutLibraryState;
   updatedAt: string;
+  diagnostics: ReconstructionDiagnostic[];
 }
 
 export interface WorkoutLibraryResult {
@@ -108,9 +110,11 @@ export class WorkoutLibraryRepository {
       else if (sync?.status === 'QUEUED' || sync?.status === 'SENDING') state = 'QUEUED';
       else if (acknowledgement?.state === 'APPLIED') state = 'DOWNLOADED';
       else if (acknowledgement?.state === 'CONFLICT' || acknowledgement?.state === 'REJECTED') state = 'CONFLICT';
+      const updatedAt = draft?.updatedAt ?? latestVersion?.updatedAt ?? latestVersion?.publishedAt ?? '';
+      const workout = draft?.payload ?? latestVersion?.payload ?? appWorkouts.find(workout => workout.workoutId === globalId)!;
       return {
         globalId,
-        workout: draft?.payload ?? latestVersion?.payload ?? appWorkouts.find(workout => workout.workoutId === globalId)!,
+        workout,
         draft,
         versions,
         latestVersion,
@@ -118,7 +122,8 @@ export class WorkoutLibraryRepository {
         acknowledgements: acknowledgements.filter(ack => ack.workoutGlobalId === globalId && versions.some(version =>
           version.versionId === ack.versionId && version.contentChecksum === ack.appliedChecksum)),
         state,
-        updatedAt: draft?.updatedAt ?? latestVersion?.updatedAt ?? latestVersion?.publishedAt ?? '',
+        updatedAt,
+        diagnostics: [...(workout.reconstructionDiagnostics ?? []), ...timestampDiagnostic(updatedAt)],
       };
     }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 

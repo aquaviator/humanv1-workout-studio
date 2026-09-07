@@ -56,9 +56,22 @@ describe("CrossAppRepository", () => {
   });
 
   it("reconstructs plans with stable occurrence identifiers", async () => {
-    const repo = new CrossAppRepository(async (_owner, name) => name === "trainingPlans" ? [{ globalId: "plan_1", humanUserId: "human_1", routineName: "Plan", deletedAt: null }] : [{ globalId: "occurrence_1", humanUserId: "human_1", seriesId: "plan_1", templateGlobalId: "routine_1", scheduledEpochDay: 20000, reminderEnabled: true, deletedAt: null }], async () => {}, () => true);
+    const repo = new CrossAppRepository(async (_owner, name) => name === "trainingPlans" ? [{ globalId: "plan_1", humanUserId: "human_1", routineName: "Plan", deletedAt: null }] : name === "plannedWorkouts" ? [{ globalId: "occurrence_1", humanUserId: "human_1", seriesId: "plan_1", templateGlobalId: "routine_1", scheduledEpochDay: 20000, reminderEnabled: true, deletedAt: null }] : [{ globalId: "routine_1", humanUserId: "human_1", deletedAt: null }], async () => {}, () => true);
     const [plan] = await repo.listAppPlans("human_1");
     expect(plan.weeks[0].placements[0]).toMatchObject({ placementId: "occurrence_1", workoutId: "routine_1", reminderEnabled: true });
+  });
+
+  it("distinguishes missing and tombstoned workout parents during plan reconstruction", async () => {
+    const records: Record<string, Record<string, unknown>[]> = {
+      trainingPlans: [{ globalId: "plan_1", humanUserId: "human_1", routineName: "Plan", deletedAt: null }],
+      plannedWorkouts: [
+        { globalId: "o1", humanUserId: "human_1", seriesId: "plan_1", templateGlobalId: "missing", scheduledEpochDay: 1, deletedAt: null },
+        { globalId: "o2", humanUserId: "human_1", seriesId: "plan_1", templateGlobalId: "archived", scheduledEpochDay: 2, deletedAt: null },
+      ], templates: [{ globalId: "archived", humanUserId: "human_1", deletedAt: 4 }],
+    };
+    const repo = new CrossAppRepository(async (_owner, name) => records[name] || [], async () => {}, () => true);
+    const [plan] = await repo.listAppPlans("human_1");
+    expect(plan.reconstructionDiagnostics?.map(item => item.category)).toEqual(["MISSING_PARENT", "ARCHIVED_PARENT"]);
   });
 
   it("durably replays an offline private edit once after reconnect", async () => {

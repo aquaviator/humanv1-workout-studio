@@ -1,5 +1,6 @@
 import { Workout, Block, ExerciseBlock, CircuitBlock, SupersetBlock, RestBlock } from "../types";
 import { Exercise } from "../catalogue";
+import { blocksPublication } from "../presentation";
 
 export interface ValidationError {
   blockId?: string;
@@ -9,6 +10,7 @@ export interface ValidationError {
 
 export function validateWorkout(workout: Workout, catalogue: Exercise[]): ValidationError[] {
   const errors: ValidationError[] = [];
+  if (blocksPublication(workout.reconstructionDiagnostics)) errors.push({ message: "Publication is unavailable because original workout details cannot be verified." });
 
   if (!workout.title || workout.title.trim() === "") {
     errors.push({ message: "Workout is missing a title." });

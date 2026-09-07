@@ -1,4 +1,5 @@
 import { Plan } from "../types";
+import { blocksPublication } from "../presentation";
 
 export interface PlanValidationError {
   placementId?: string;
@@ -7,6 +8,7 @@ export interface PlanValidationError {
 
 export function validatePlan(plan: Plan): PlanValidationError[] {
   const errors: PlanValidationError[] = [];
+  if (blocksPublication(plan.reconstructionDiagnostics)) errors.push({ message: "Publication is unavailable because an original workout cannot be verified." });
   
   if (!plan.title || plan.title.trim() === "") {
     errors.push({ message: "Plan is missing a title." });

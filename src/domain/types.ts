@@ -1,4 +1,5 @@
 export type StableId = string;
+import type { ReconstructionDiagnostic } from "./presentation";
 
 export interface MetricPrescription {
   prescriptionId: StableId;
@@ -78,6 +79,7 @@ export interface Workout {
   tags: string[];
   estimatedDurationSeconds?: number;
   blocks: Block[];
+  reconstructionDiagnostics?: ReconstructionDiagnostic[];
 }
 
 export interface ProtocolSegmentTarget {
@@ -141,4 +143,5 @@ export interface Plan {
   timezone?: string;
   weeks: PlanWeek[];
   notes?: string;
+  reconstructionDiagnostics?: ReconstructionDiagnostic[];
 }

@@ -3,6 +3,7 @@ import { HumanIdentity } from "../../domain/identity";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { AlertCircle, RefreshCw, UploadCloud, DownloadCloud, Trash2 } from "lucide-react";
+import { formatUserDate } from "../../domain/presentation";
 
 export default function ConflictCentre({ identity }: { identity: HumanIdentity }) {
   const [conflicts, setConflicts] = useState<SyncRecord[]>([]);
@@ -78,7 +79,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
                 <div className="text-xs text-hv-text-muted font-mono flex flex-wrap gap-4">
                   <span>ID: {conflict.envelope.globalId.substring(0,8)}...</span>
                   <span>Local Rev: {conflict.envelope.revision}</span>
-                  <span>Updated: {new Date(conflict.envelope.updatedAt).toLocaleString()}</span>
+                  <span>Updated: {formatUserDate(conflict.envelope.updatedAt, true)}</span>
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
