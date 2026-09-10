@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blocksPublication, dateFromUnknown, dedupeDiagnostics, formatUserDate, publicationBlockReason, referenceDiagnostic, timestampDiagnostic } from "../presentation";
+import { blocksPublication, dateFromUnknown, dedupeDiagnostics, formatUserDate, proposePlanReferenceResolution, publicationBlockReason, referenceDiagnostic, timestampDiagnostic } from "../presentation";
 import { validatePlan } from "../validation/planValidation";
 
 describe("truthful reconstructed-data presentation", () => {
@@ -35,5 +35,12 @@ describe("truthful reconstructed-data presentation", () => {
   it("collapses repeated diagnostics for the same stable reference", () => {
     const diagnostic = referenceDiagnostic("workout", "workout_1", null)!;
     expect(dedupeDiagnostics([diagnostic, diagnostic])).toHaveLength(1);
+  });
+  it("creates deterministic non-mutating replacement and removal proposals", () => {
+    const plan = { weeks: [{ placements: [{ placementId: "placement_b", workoutId: "template_legs" }, { placementId: "placement_a", workoutId: "template_legs" }, { placementId: "other", workoutId: "other" }] }] };
+    const before = structuredClone(plan);
+    expect(proposePlanReferenceResolution(plan, "template_legs", { type: "REMOVE" })).toEqual({ mode: "DRY_RUN", referenceId: "template_legs", action: { type: "REMOVE" }, affectedPlacementIds: ["placement_a", "placement_b"] });
+    expect(proposePlanReferenceResolution(plan, "template_legs", { type: "REPLACE", workoutId: "replacement", workoutVersionId: "replacement_r1_aaaaaaaaaaaa" }).affectedPlacementIds).toEqual(["placement_a", "placement_b"]);
+    expect(plan).toEqual(before);
   });
 });

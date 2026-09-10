@@ -70,3 +70,27 @@ export function publicationBlockReason(diagnostics: ReconstructionDiagnostic[] =
   if (unavailable && !archived) return `Cannot publish: ${unavailable === 1 ? "one workout reference is" : `${unavailable} workout references are`} unavailable`;
   return `Cannot publish: ${archived} archived ${archived === 1 ? "workout" : "workouts"} and ${unavailable} unavailable ${unavailable === 1 ? "reference" : "references"}`;
 }
+
+export type PlanResolutionAction =
+  | { type: "REMOVE" }
+  | { type: "REPLACE"; workoutId: string; workoutVersionId: string };
+
+export interface PlanResolutionProposal {
+  mode: "DRY_RUN";
+  referenceId: string;
+  action: PlanResolutionAction;
+  affectedPlacementIds: string[];
+}
+
+/** Pure proposal only: callers must obtain explicit approval before applying it. */
+export function proposePlanReferenceResolution(plan: { weeks: Array<{ placements: Array<{ placementId: string; workoutId: string }> }> }, referenceId: string, action: PlanResolutionAction): PlanResolutionProposal {
+  return {
+    mode: "DRY_RUN",
+    referenceId,
+    action,
+    affectedPlacementIds: plan.weeks.flatMap(week => week.placements)
+      .filter(placement => placement.workoutId === referenceId)
+      .map(placement => placement.placementId)
+      .sort(),
+  };
+}

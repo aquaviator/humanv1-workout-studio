@@ -74,6 +74,21 @@ describe("CrossAppRepository", () => {
     expect(plan.reconstructionDiagnostics?.map(item => item.category)).toEqual(["MISSING_PARENT", "ARCHIVED_PARENT"]);
   });
 
+  it("preserves all 22 archived-parent placements and their schedule evidence", async () => {
+    const occurrences = Array.from({ length: 22 }, (_, index) => ({ globalId: `placement_${String(index + 1).padStart(2, "0")}`, humanUserId: "synthetic_owner", seriesId: "plan_73584f7d32644da293bae765c66c160f", templateGlobalId: "template_legs", scheduledEpochDay: 21000 + index, deletedAt: null }));
+    const records: Record<string, Record<string, unknown>[]> = {
+      trainingPlans: [{ globalId: "plan_73584f7d32644da293bae765c66c160f", humanUserId: "synthetic_owner", routineName: "Synthetic historical plan", deletedAt: null }],
+      plannedWorkouts: occurrences,
+      templates: [{ globalId: "template_legs", humanUserId: "synthetic_owner", name: "Archived legs", deletedAt: 20900 }],
+    };
+    const repo = new CrossAppRepository(async (_owner, name) => records[name] || [], async () => { throw new Error("read-only fixture must not write"); }, () => true);
+    const [plan] = await repo.listAppPlans("synthetic_owner");
+    expect(plan.weeks[0].placements).toHaveLength(22);
+    expect(new Set(plan.weeks[0].placements.map(item => item.placementId)).size).toBe(22);
+    expect(plan.weeks[0].placements[0]).toMatchObject({ placementId: "placement_01", workoutId: "template_legs", scheduledEpochDay: 21000 });
+    expect(plan.reconstructionDiagnostics).toMatchObject([{ category: "ARCHIVED_PARENT", referenceId: "template_legs", displayName: "Archived legs" }]);
+  });
+
   it("durably replays an offline private edit once after reconnect", async () => {
     let online = false; const writes: string[] = [];
     const repo = new CrossAppRepository(async () => [], async (_owner, collectionName, id) => { writes.push(`${collectionName}/${id}`); }, () => online);

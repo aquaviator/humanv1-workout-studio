@@ -124,6 +124,8 @@ export interface PlanPlacement {
   preferredMinuteOfDay: number | null;
   reminderEnabled: boolean;
   notes: string;
+  /** Original Android schedule evidence. Optional for Studio-authored plans. */
+  scheduledEpochDay?: number;
 }
 
 export interface PlanWeek {

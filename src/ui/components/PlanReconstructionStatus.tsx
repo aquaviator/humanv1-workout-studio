@@ -12,7 +12,7 @@ const categoryText = (diagnostic: ReconstructionDiagnostic) => {
 
 const dayName = (value: number) => ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][value] || "Unknown day";
 
-export function PlanReconstructionStatus({ plan }: { plan: Plan }) {
+export function PlanReconstructionStatus({ plan, todayEpochDay = Math.floor(Date.now() / 86400000) }: { plan: Plan; todayEpochDay?: number }) {
   const diagnostics = dedupeDiagnostics(plan.reconstructionDiagnostics ?? []);
   const blocking = diagnostics.filter(item => item.severity === "blocking");
   const reason = publicationBlockReason(diagnostics);
@@ -23,14 +23,18 @@ export function PlanReconstructionStatus({ plan }: { plan: Plan }) {
     {reason && <p id="plan-publication-reason" className="text-sm font-semibold mt-1">{reason}.</p>}
     <div className="mt-3 space-y-2">{blocking.map(item => {
       const affected = plan.weeks.flatMap(week => week.placements.filter(placement => item.referenceId ? placement.workoutId === item.referenceId : !placement.workoutId).map(placement => ({ week, placement })));
+      const past = affected.filter(({ placement }) => typeof placement.scheduledEpochDay === "number" && placement.scheduledEpochDay < todayEpochDay);
+      const future = affected.filter(({ placement }) => typeof placement.scheduledEpochDay !== "number" || placement.scheduledEpochDay >= todayEpochDay);
       return <div key={`${item.category}:${item.referenceId ?? ""}`} className="text-sm">
         <p><span className="font-semibold">{item.displayName || "Workout unavailable"}:</span> {categoryText(item)}</p>
+        <p className="mt-1">{affected.length} preserved {affected.length === 1 ? "placement" : "placements"}: {past.length} historical, {future.length} future or unscheduled.</p>
+        <p className="mt-1 text-hv-text-muted">Resolution preview only: an explicit replacement would update these stable placements to a selected immutable workout version; explicit removal would remove only these placements. Nothing has been changed.</p>
         <details className="mt-1"><summary className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-hv-primary">Technical details</summary>
           <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2">
             <dt>Entity</dt><dd>{item.entityType}</dd><dt>Reference</dt><dd>{item.referenceId || "Unavailable"}</dd>
             <dt>Code</dt><dd>{item.category}</dd><dt>Impact</dt><dd>Publication blocked</dd>
           </dl>
-          <ul className="mt-1 list-disc pl-5">{affected.map(({ week, placement }) => <li key={placement.placementId}>{week.label}, {dayName(placement.dayOfWeek)} · placement {placement.placementId}</li>)}</ul>
+          <ul className="mt-1 list-disc pl-5">{affected.map(({ week, placement }) => <li key={placement.placementId}>{week.label}, {dayName(placement.dayOfWeek)} · placement {placement.placementId} · {typeof placement.scheduledEpochDay === "number" && placement.scheduledEpochDay < todayEpochDay ? "historical" : "future or unscheduled"}</li>)}</ul>
         </details>
       </div>;
     })}</div>

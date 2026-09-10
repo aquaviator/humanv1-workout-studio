@@ -248,7 +248,7 @@ export class CrossAppRepository {
     return plans.filter(p => p.humanUserId === owner && p.deletedAt == null).map(raw => {
       const id = asString(raw.globalId, asString(raw.__id));
       const linked = occurrences.filter(item => item.humanUserId === owner && item.seriesId === id && item.deletedAt == null);
-      const placements: PlanPlacement[] = linked.map(item => ({ placementId: asString(item.globalId, asString(item.__id)), dayOfWeek: ((asNumber(item.scheduledEpochDay) + 3) % 7) + 1, workoutId: asString(item.templateGlobalId), workoutVersionId: asString((item.extensions as CloudDoc)?.workoutVersionId, `editable:${asString(item.templateGlobalId)}`), preferredMinuteOfDay: typeof item.preferredMinuteOfDay === "number" ? item.preferredMinuteOfDay : null, reminderEnabled: item.reminderEnabled === true, notes: asString((item.extensions as CloudDoc)?.notes) }));
+      const placements: PlanPlacement[] = linked.map(item => ({ placementId: asString(item.globalId, asString(item.__id)), dayOfWeek: ((asNumber(item.scheduledEpochDay) + 3) % 7) + 1, workoutId: asString(item.templateGlobalId), workoutVersionId: asString((item.extensions as CloudDoc)?.workoutVersionId, `editable:${asString(item.templateGlobalId)}`), preferredMinuteOfDay: typeof item.preferredMinuteOfDay === "number" ? item.preferredMinuteOfDay : null, reminderEnabled: item.reminderEnabled === true, notes: asString((item.extensions as CloudDoc)?.notes), scheduledEpochDay: typeof item.scheduledEpochDay === "number" ? item.scheduledEpochDay : undefined }));
       const diagnostics = linked.map(item => {
         const referenceId = asString(item.templateGlobalId);
         const parent = templates.find(template => asString(template.globalId, asString(template.__id)) === referenceId);

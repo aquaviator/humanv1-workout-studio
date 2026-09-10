@@ -39,4 +39,14 @@ describe("Plan editor reconstruction status", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Existing plan data has not been deleted");
     expect(await axe(container)).toHaveNoViolations();
   });
+  it("collapses one archived parent while keeping 22 past and future placements inspectable", () => {
+    const placements = Array.from({ length: 22 }, (_, index) => ({ ...placement, placementId: `placement-${index + 1}`, scheduledEpochDay: 100 + index }));
+    const fixture = { ...plan(), weeks: [{ ...plan().weeks[0], placements }], reconstructionDiagnostics: [referenceDiagnostic("workout", placement.workoutId, { deletedAt: 1, name: "Archived Legs" })!] };
+    render(<PlanReconstructionStatus plan={fixture} todayEpochDay={111} />);
+    expect(screen.getByText("22 preserved placements: 11 historical, 11 future or unscheduled.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Archived Legs:/)).toHaveLength(1);
+    expect(screen.getByText(/placement-1 · historical/)).toBeInTheDocument();
+    expect(screen.getByText(/placement-22 · future or unscheduled/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing has been changed/)).toBeInTheDocument();
+  });
 });
