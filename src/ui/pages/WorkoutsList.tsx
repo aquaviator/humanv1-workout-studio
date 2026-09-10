@@ -112,7 +112,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
     <div className="p-8 h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">My Workouts</h1>
-        <Link to="/workouts/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
+        <Link to="/workouts/new" className="bg-hv-primary text-hv-bg px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
           Create Workout
         </Link>
       </div>
@@ -125,12 +125,14 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
           <input 
             type="text" 
             placeholder="Search workouts..." 
+            aria-label="Search workouts"
             className="w-full bg-hv-surface-1 border border-hv-border rounded-md pl-9 pr-4 py-2 focus:outline-none focus:border-hv-primary"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <select 
+          aria-label="Filter workouts by discipline"
           className="bg-hv-surface-1 border border-hv-border rounded-md px-4 py-2 focus:outline-none"
           value={filterDiscipline}
           onChange={(e) => setFilterDiscipline(e.target.value)}
@@ -145,6 +147,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
           <option value="MOBILITY">Mobility</option>
         </select>
         <select 
+          aria-label="Sort workouts"
           className="bg-hv-surface-1 border border-hv-border rounded-md px-4 py-2 focus:outline-none"
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as "updatedAt" | "title" | "duration")}

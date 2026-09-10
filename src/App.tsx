@@ -9,6 +9,7 @@ import { entitlementRepository } from "./repositories/FirebaseEntitlementReposit
 import EntitlementGate from "./ui/components/EntitlementGate";
 import { env } from "./config/env";
 import { crossAppRepository } from "./repositories/CrossAppRepository";
+import { syncManager } from "./repositories/SyncManager";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
 const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
@@ -86,7 +87,10 @@ export default function App() {
 
   useEffect(() => {
     if (!identity) return;
-    const replay = () => { void crossAppRepository.replayPending(identity.humanUserId).catch(() => undefined); };
+    const replay = () => {
+      void crossAppRepository.replayPending(identity.humanUserId).catch(() => undefined);
+      void syncManager.syncPending().catch(() => undefined);
+    };
     window.addEventListener("online", replay); replay();
     return () => window.removeEventListener("online", replay);
   }, [identity]);

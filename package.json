@@ -10,8 +10,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "rules:compat": "node scripts/verify-firestore-rules.mjs",
-    "test": "cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=user1@example.com VITE_FIREBASE_TEST_PASSWORD=password123 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 firebase emulators:exec --only auth,firestore --project demo-humanv1-workout-studio \"vitest run\"",
-    "test:emulator": "cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=user1@example.com VITE_FIREBASE_TEST_PASSWORD=password123 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 firebase emulators:exec --only auth,firestore --project demo-humanv1-workout-studio \"vitest run src/repositories/__tests__/EmulatorAcceptance.test.ts\""
+    "test": "cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=user1@example.com VITE_FIREBASE_TEST_PASSWORD=password123 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 firebase emulators:exec --only auth,firestore --project demo-humanv1-workout-studio \"vitest run --maxWorkers=1\"",
+    "test:emulator": "cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=user1@example.com VITE_FIREBASE_TEST_PASSWORD=password123 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 firebase emulators:exec --only auth,firestore --project demo-humanv1-workout-studio \"vitest run src/repositories/__tests__/EmulatorAcceptance.test.ts --maxWorkers=1\"",
+    "test:browser": "cross-env FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 playwright test"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
@@ -34,6 +35,7 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",
+    "@playwright/test": "^1.55.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",

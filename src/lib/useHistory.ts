@@ -1,38 +1,36 @@
 import { useState, useCallback } from 'react';
 
 export function useHistory<T>(initialState: T) {
-  const [history, setHistory] = useState<T[]>([initialState]);
-  const [pointer, setPointer] = useState<number>(0);
+  const [history, setHistory] = useState<{ entries: T[]; pointer: number }>(() => ({ entries: [initialState], pointer: 0 }));
 
-  const set = useCallback((newState: T) => {
-    setHistory((prev) => {
-      const copy = prev.slice(0, pointer + 1);
-      copy.push(newState);
-      return copy;
+  const set = useCallback((nextState: T | ((current: T) => T)) => {
+    setHistory(previous => {
+      const entries = previous.entries.slice(0, previous.pointer + 1);
+      const current = entries[entries.length - 1];
+      entries.push(typeof nextState === 'function' ? (nextState as (value: T) => T)(current) : nextState);
+      return { entries, pointer: entries.length - 1 };
     });
-    setPointer((prev) => prev + 1);
-  }, [pointer]);
+  }, []);
 
   const undo = useCallback(() => {
-    setPointer((prev) => Math.max(0, prev - 1));
+    setHistory(previous => ({ ...previous, pointer: Math.max(0, previous.pointer - 1) }));
   }, []);
 
   const redo = useCallback(() => {
-    setPointer((prev) => Math.min(history.length - 1, prev + 1));
-  }, [history.length]);
+    setHistory(previous => ({ ...previous, pointer: Math.min(previous.entries.length - 1, previous.pointer + 1) }));
+  }, []);
 
   const reset = useCallback((newState: T) => {
-    setHistory([newState]);
-    setPointer(0);
+    setHistory({ entries: [newState], pointer: 0 });
   }, []);
 
   return {
-    state: history[pointer],
+    state: history.entries[history.pointer],
     set,
     reset,
     undo,
     redo,
-    canUndo: pointer > 0,
-    canRedo: pointer < history.length - 1,
+    canUndo: history.pointer > 0,
+    canRedo: history.pointer < history.entries.length - 1,
   };
 }

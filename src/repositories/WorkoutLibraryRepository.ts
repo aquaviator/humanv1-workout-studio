@@ -64,9 +64,10 @@ export class WorkoutLibraryRepository {
   private cacheKey(humanUserId: string) { return `verified_workout_library_${humanUserId}`; }
 
   async list(humanUserId: string): Promise<WorkoutLibraryResult> {
-    const [drafts, syncRecords] = await Promise.all([
+    const [drafts, syncRecords, publicationSyncRecords] = await Promise.all([
       draftRepository.listWorkoutEnvelopes(humanUserId),
       syncManager.listSyncRecords(humanUserId, 'workout'),
+      syncManager.listPublicationSyncRecords(humanUserId, 'workout'),
     ]);
     let cache = await get<VerifiedCache>(this.cacheKey(humanUserId));
     let offline = !this.online();
@@ -93,6 +94,10 @@ export class WorkoutLibraryRepository {
     const acknowledgements = cache?.acknowledgements ?? [];
     const syncByWorkout = new Map<string, SyncRecord>();
     syncRecords.forEach(record => syncByWorkout.set(record.envelope.globalId, record));
+    const publicationSyncByWorkout = new Map<string, SyncRecord>();
+    publicationSyncRecords.sort((a, b) => b.envelope.revision - a.envelope.revision).forEach(record => {
+      if (!publicationSyncByWorkout.has(record.envelope.globalId)) publicationSyncByWorkout.set(record.envelope.globalId, record);
+    });
     const appWorkouts = offline ? [] : await crossAppRepository.listAppWorkouts(humanUserId).catch(() => []);
     const ids = new Set([...drafts.map(draft => draft.globalId), ...publications.map(version => version.globalId), ...appWorkouts.map(workout => workout.workoutId)]);
 
@@ -105,6 +110,7 @@ export class WorkoutLibraryRepository {
         ack.versionId === latestVersion.versionId && ack.appliedChecksum === latestVersion.contentChecksum) : [];
       const acknowledgement = exactAcks.sort((a, b) => b.sourceRevision - a.sourceRevision)[0] ?? null;
       const sync = syncByWorkout.get(globalId);
+      const publicationSync = publicationSyncByWorkout.get(globalId);
       let state: WorkoutLibraryState = latestVersion ? 'SENT' : 'DRAFT';
       if (sync?.status === 'CONFLICT') state = 'CONFLICT';
       else if (sync?.status === 'FAILED') state = 'RETRY_REQUIRED';
@@ -122,7 +128,7 @@ export class WorkoutLibraryRepository {
         acknowledgement,
         acknowledgements: acknowledgements.filter(ack => ack.workoutGlobalId === globalId && versions.some(version =>
           version.versionId === ack.versionId && version.contentChecksum === ack.appliedChecksum)),
-        syncRecord: sync ?? null,
+        syncRecord: publicationSync ?? null,
         state,
         updatedAt,
         diagnostics: [...(workout.reconstructionDiagnostics ?? []), ...timestampDiagnostic(updatedAt)],

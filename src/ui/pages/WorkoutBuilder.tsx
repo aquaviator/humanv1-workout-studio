@@ -60,12 +60,14 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const publishButtonRef = useRef<HTMLButtonElement>(null);
   const continueButtonRef = useRef<HTMLButtonElement>(null);
   const [identicalVersion, setIdenticalVersion] = useState<PublishedEnvelope<Workout> | null>(null);
+  const catalogueRequestedRef = useRef(false);
 
   useEffect(() => {
-    if (routeWorkoutId || workout.catalogueReleaseId !== "catalogue_release_pending") return;
+    if (routeWorkoutId || workout.catalogueReleaseId !== "catalogue_release_pending" || catalogueRequestedRef.current) return;
+    catalogueRequestedRef.current = true;
     const release = catalogueRepository.getActiveReleaseId?.();
-    if (release) void release.then(releaseId => setWorkout({ ...workout, catalogueReleaseId: releaseId }));
-  }, [routeWorkoutId, setWorkout, workout]);
+    if (release) void release.then(releaseId => setWorkout(current => ({ ...current, catalogueReleaseId: releaseId })));
+  }, [routeWorkoutId, setWorkout, workout.catalogueReleaseId]);
   
   useEffect(() => {
     if (!workout.workoutId) return;

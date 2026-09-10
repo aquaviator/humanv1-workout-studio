@@ -27,6 +27,7 @@ export default defineConfig(({ command, mode }) => {
       fileParallelism: false,
       pool: 'threads',
       maxWorkers: 1,
+      exclude: ['e2e/**', 'node_modules/**'],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

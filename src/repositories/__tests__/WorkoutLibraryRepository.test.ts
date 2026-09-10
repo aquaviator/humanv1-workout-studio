@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   cache: new Map<string, unknown>(),
   drafts: [] as unknown[],
   syncs: [] as unknown[],
+  publicationSyncs: [] as unknown[],
 }));
 
 vi.mock('idb-keyval', () => ({
@@ -13,7 +14,10 @@ vi.mock('idb-keyval', () => ({
 }));
 vi.mock('../../config/firebase', () => ({ db: {} }));
 vi.mock('../DraftRepository', () => ({ draftRepository: { listWorkoutEnvelopes: vi.fn(() => Promise.resolve(state.drafts)) } }));
-vi.mock('../SyncManager', () => ({ syncManager: { listSyncRecords: vi.fn(() => Promise.resolve(state.syncs)) } }));
+vi.mock('../SyncManager', () => ({ syncManager: {
+  listSyncRecords: vi.fn(() => Promise.resolve(state.syncs)),
+  listPublicationSyncRecords: vi.fn(() => Promise.resolve(state.publicationSyncs)),
+} }));
 vi.mock('../DeliveryAcknowledgementRepository', () => ({ deliveryAcknowledgementRepository: { listForOwner: vi.fn() } }));
 
 import { WorkoutLibraryRepository } from '../WorkoutLibraryRepository';
@@ -30,7 +34,7 @@ const ack = (overrides: Record<string, unknown> = {}) => ({ acknowledgementId: '
   appliedChecksum: 'b'.repeat(64), sourceRevision: 2, state: 'APPLIED' as const, reasonCode: null, ...overrides });
 
 describe('WorkoutLibraryRepository', () => {
-  beforeEach(() => { state.cache.clear(); state.drafts = []; state.syncs = []; });
+  beforeEach(() => { state.cache.clear(); state.drafts = []; state.syncs = []; state.publicationSyncs = []; });
 
   it('reconstructs a published-only workout and requires an exact applied acknowledgement', async () => {
     const repository = new WorkoutLibraryRepository(async () => [publication({ revision: 1, versionId: 'workout-1_r1_old' }), publication()],
@@ -63,5 +67,13 @@ describe('WorkoutLibraryRepository', () => {
     online = true;
     expect((await repository.list('human-1')).items).toHaveLength(1);
     expect(publications).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps publication delivery status separate from a draft synchronization record', async () => {
+    state.syncs = [{ syncType: 'draft', envelope: { globalId: 'workout-1', revision: 3 }, status: 'SYNCED', type: 'workout' }];
+    state.publicationSyncs = [{ syncType: 'publication', envelope: publication(), status: 'SYNCED', type: 'workout' }];
+    const repository = new WorkoutLibraryRepository(async () => [publication()], async () => [ack()], () => true);
+    const item = (await repository.list('human-1')).items[0];
+    expect(item.syncRecord).toMatchObject({ syncType: 'publication', status: 'SYNCED' });
   });
 });
