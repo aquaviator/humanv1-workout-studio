@@ -1,4 +1,5 @@
-const SHELL_CACHE = 'humanv1-workout-studio-shell-v1';
+const BUILD_ID = new URL(self.location.href).searchParams.get('build') || '__HV1_BUILD_ID__';
+const SHELL_CACHE = `humanv1-workout-studio-shell-${BUILD_ID}`;
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
@@ -30,6 +31,7 @@ self.addEventListener('fetch', event => {
       }
       return response;
     });
+    if (event.request.mode === 'navigate') return network.catch(() => cached || requestFallback(event.request));
     return cached || network.catch(() => requestFallback(event.request));
   }));
 });
