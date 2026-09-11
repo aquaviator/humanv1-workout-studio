@@ -1,11 +1,16 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { initializeFirestore, connectFirestoreEmulator, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { env } from './env';
 
 const app = initializeApp(env.firebase);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// Identity, entitlement and delivery receipts must remain readable from the
+// browser's durable cache after a process restart. Network writes still flow
+// only through the repository synchronization queues.
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 
 if (env.useEmulator) {
   if (!env.firebase.projectId.startsWith('demo-')) {

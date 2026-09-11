@@ -19,6 +19,12 @@ export interface SyncRecord {
 
 type Subscriber = () => void;
 
+declare global {
+  interface Window {
+    __HV1_TEST_PAUSE_PUBLICATION_SEND__?: () => Promise<void>;
+  }
+}
+
 export class SyncManager {
   private isOnline = navigator.onLine;
   private subscribers = new Set<Subscriber>();
@@ -125,6 +131,11 @@ export class SyncManager {
     this.notify();
 
     try {
+      // Vite removes this entire test hook from production builds because the
+      // condition is a compile-time false literal at the release boundary.
+      if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true' && isPub) {
+        await window.__HV1_TEST_PAUSE_PUBLICATION_SEND__?.();
+      }
       await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(docRef);
         if (snapshot.exists()) {

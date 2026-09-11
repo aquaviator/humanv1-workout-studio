@@ -68,6 +68,11 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     let context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1440, height: 900 } });
     let { page } = await openSignedIn(context);
     await makeValid(page);
+    await page.evaluate(() => navigator.serviceWorker.register('/service-worker.js'));
+    await expect.poll(() => page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      return registration?.active?.state ?? registration?.installing?.state ?? registration?.waiting?.state ?? 'missing';
+    }), { timeout: 20_000 }).toBe('activated');
 
     const send = page.getByRole('button', { name: 'Send to my apps' });
     await send.click();
@@ -90,6 +95,11 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     const first = await latestPublication();
     expect(first.revision).toBe(1);
 
+    await page.goto('/workouts');
+    await expect(page.getByText('Browser delivery acceptance')).toBeVisible();
+    await page.getByText('Browser delivery acceptance').click();
+    await expect(page.getByLabel('Workout Title')).toBeVisible();
+
     await page.context().setOffline(true);
     await page.getByLabel('Workout Title').fill('Browser delivery acceptance revision 2');
     await expect(page.getByText('Saving...', { exact: true })).toBeVisible();
@@ -98,11 +108,16 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.getByRole('button', { name: 'Send to my apps' }).last().click();
     await expect(page.getByRole('heading', { name: 'Queued — will send when connected' })).toBeVisible();
     expect((await latestPublication()).revision).toBe(1);
-    await page.close();
+    await context.close();
+
+    context = await chromium.launchPersistentContext(profile, { headless: true, offline: true, viewport: { width: 1440, height: 900 } });
     page = await context.newPage();
-    await page.goto('/workouts', { waitUntil: 'commit' }).catch(() => undefined);
-    await context.setOffline(false);
     await page.goto('/workouts');
+    await expect(page.getByText('Offline — showing the last verified cloud status.')).toBeVisible();
+    await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Queued — will send when connected' })).toBeVisible();
+    expect((await latestPublication()).revision).toBe(1);
+    await context.setOffline(false);
     await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
     await expect.poll(async () => (await latestPublication())?.revision).toBe(2);
 
@@ -119,8 +134,40 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByRole('heading', { name: 'Available in your apps' })).toBeVisible();
     expect(revision2.revision).toBe(2);
 
+    // Pause immediately after the durable SENDING transition, sever the real
+    // browser network, and prove normal retry completes the same version once.
+    await page.getByText('Browser delivery acceptance revision 2').click();
+    await page.getByLabel('Workout Title').fill('Browser delivery acceptance interrupted send');
+    await expect(page.getByText('Saving...', { exact: true })).toBeVisible();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      window.__HV1_TEST_PAUSE_PUBLICATION_SEND__ = () => new Promise<void>((_resolve, reject) => {
+        (window as typeof window & { __HV1_TEST_RELEASE_SEND__?: () => void }).__HV1_TEST_RELEASE_SEND__ = () => {
+          const failure = Object.assign(new Error('offline during send'), { code: 'unavailable' });
+          reject(failure);
+        };
+      });
+    });
+    await page.getByRole('button', { name: 'Send to my apps' }).click();
+    await page.getByRole('button', { name: 'Send to my apps' }).last().click();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1…' })).toBeVisible();
+    await context.setOffline(true);
+    await page.evaluate(() => (window as typeof window & { __HV1_TEST_RELEASE_SEND__?: () => void }).__HV1_TEST_RELEASE_SEND__?.());
+    await expect(page.getByRole('heading', { name: 'Retry required' })).toBeVisible({ timeout: 20_000 });
+    expect((await latestPublication()).revision).toBe(2);
+    await context.close();
+
+    context = await chromium.launchPersistentContext(profile, { headless: true, offline: true, viewport: { width: 390, height: 844 } });
+    page = await context.newPage();
+    await page.goto('/workouts');
+    await expect(page.getByText('Browser delivery acceptance interrupted send')).toBeVisible();
+    await context.setOffline(false);
+    await expect.poll(async () => (await latestPublication())?.revision).toBe(3);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
+
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
+    await expect(page.getByText('Browser delivery acceptance interrupted send')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     expect(await seriousAxeViolations(page)).toEqual([]);
     await context.close();
@@ -128,8 +175,8 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 390, height: 844 } });
     ({ page } = await openSignedIn(context));
     await page.goto('/workouts');
-    await expect(page.getByRole('heading', { name: 'Available in your apps' })).toBeVisible();
-    await expect(page.getByText('Workout sent to HumanV1')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
+    await expect(page.getByText('Available in your apps')).toHaveCount(0);
     await context.close();
   });
 });
