@@ -62,18 +62,27 @@ async function seriousAxeViolations(page: Page) {
 }
 
 test.describe.serial('truthful delivery in a genuine persistent browser', () => {
-  test('online, offline restart, reconnect, exact acknowledgement, keyboard, mobile and accessibility', async () => {
+  let context: BrowserContext;
+  let page: Page;
+
+  test.beforeAll(async () => {
     await rm(profile, { recursive: true, force: true });
     await mkdir(profile, { recursive: true });
-    let context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1440, height: 900 } });
-    let { page } = await openSignedIn(context);
+    context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1440, height: 900 } });
+    ({ page } = await openSignedIn(context));
     await makeValid(page);
     await page.evaluate(() => navigator.serviceWorker.register('/service-worker.js'));
     await expect.poll(() => page.evaluate(async () => {
       const registration = await navigator.serviceWorker.getRegistration();
       return registration?.active?.state ?? registration?.installing?.state ?? registration?.waiting?.state ?? 'missing';
     }), { timeout: 20_000 }).toBe('activated');
+  });
 
+  test.afterAll(async () => {
+    await context?.close().catch(() => undefined);
+  });
+
+  test('confirms an online publication with keyboard-safe controls', async () => {
     const send = page.getByRole('button', { name: 'Send to my apps' });
     await send.click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -99,7 +108,10 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByText('Browser delivery acceptance')).toBeVisible();
     await page.getByText('Browser delivery acceptance').click();
     await expect(page.getByLabel('Workout Title')).toBeVisible();
+  });
 
+  test('survives a closed-process offline restart and replays on reconnect', async () => {
+    const send = page.getByRole('button', { name: 'Send to my apps' });
     await page.context().setOffline(true);
     await page.getByLabel('Workout Title').fill('Browser delivery acceptance revision 2');
     await expect(page.getByText('Saving...', { exact: true })).toBeVisible();
@@ -120,7 +132,9 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await context.setOffline(false);
     await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
     await expect.poll(async () => (await latestPublication())?.revision).toBe(2);
+  });
 
+  test('requires the exact authoritative acknowledgement', async () => {
     const revision2 = await latestPublication();
     await writeAck({ case: 'wrong-checksum', appliedChecksum: '0'.repeat(64) });
     await writeAck({ case: 'wrong-owner', humanUserId: 'human_other_owner' });
@@ -133,7 +147,9 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Available in your apps' })).toBeVisible();
     expect(revision2.revision).toBe(2);
+  });
 
+  test('recovers an interrupted active send and remains accessible on mobile', async () => {
     // Pause immediately after the durable SENDING transition, sever the real
     // browser network, and prove normal retry completes the same version once.
     await page.getByText('Browser delivery acceptance revision 2').click();
@@ -177,6 +193,5 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.goto('/workouts');
     await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
     await expect(page.getByText('Available in your apps')).toHaveCount(0);
-    await context.close();
   });
 });
