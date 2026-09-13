@@ -32,3 +32,15 @@ describe('DeliveryAcknowledgementRepository', () => {
     ]);
   });
 });
+
+describe('plan delivery acknowledgements', () => {
+  it('accepts only the exact owner, plan version, checksum, revision and dependency set', async () => {
+    const exact = { schemaVersion: 1, humanUserId: 'human_1', applicationId: 'HUMAN_STRENGTH', planGlobalId: 'plan_1', planVersionId: 'plan_1_r1', planChecksum: 'a'.repeat(64), sourceRevision: 1, workoutVersionIds: ['workout_b_r1', 'workout_a_r1'], state: 'APPLIED', reasonCode: null };
+    const repository = new DeliveryAcknowledgementRepository(async () => [], async () => [
+      { id: 'wrong', data: { ...exact, planChecksum: 'b'.repeat(64) } }, { id: 'exact', data: exact },
+    ]);
+    await expect(repository.findExactPlan('human_1', { planGlobalId: 'plan_1', planVersionId: 'plan_1_r1', planChecksum: 'a'.repeat(64), sourceRevision: 1, workoutVersionIds: ['workout_a_r1', 'workout_b_r1'] }))
+      .resolves.toMatchObject({ acknowledgementId: 'exact', state: 'APPLIED' });
+    await expect(repository.findExactPlan('human_1', { planGlobalId: 'plan_1', planVersionId: 'plan_1_r1', planChecksum: 'a'.repeat(64), sourceRevision: 1, workoutVersionIds: ['workout_a_r1'] })).resolves.toBeNull();
+  });
+});

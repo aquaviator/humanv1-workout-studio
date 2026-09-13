@@ -231,6 +231,38 @@ service cloud.firestore {
         && publication.data.revision == request.resource.data.sourceRevision
         && publication.data.contentChecksum == request.resource.data.appliedChecksum;
     }
+    function validPlanDeliveryAck(humanUserId, acknowledgementId) {
+      let publication = get(/databases/$(database)/documents/users/$(humanUserId)/publishedPlans/$(request.resource.data.planVersionId));
+      return request.resource.data.keys().hasOnly([
+          "schemaVersion", "acknowledgementId", "humanUserId", "planGlobalId",
+          "planVersionId", "planChecksum", "applicationId", "sourceRevision",
+          "workoutVersionIds", "state", "reasonCode", "clientAppliedAtMillis", "createdAt"
+        ])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.acknowledgementId == acknowledgementId
+        && request.resource.data.humanUserId == humanUserId
+        && request.resource.data.planGlobalId is string
+        && request.resource.data.planGlobalId != ""
+        && request.resource.data.planVersionId is string
+        && request.resource.data.planVersionId != ""
+        && request.resource.data.planChecksum is string
+        && request.resource.data.planChecksum.matches("^[0-9a-f]{64}$")
+        && request.resource.data.applicationId == "HUMAN_STRENGTH"
+        && request.resource.data.sourceRevision is int
+        && request.resource.data.sourceRevision >= 1
+        && request.resource.data.workoutVersionIds is list
+        && request.resource.data.workoutVersionIds.size() > 0
+        && request.resource.data.state in ["APPLIED", "CONFLICT", "REJECTED"]
+        && (request.resource.data.reasonCode == null || request.resource.data.reasonCode is string)
+        && request.resource.data.clientAppliedAtMillis is int
+        && request.resource.data.createdAt == request.time
+        && publication.data.humanUserId == humanUserId
+        && publication.data.globalId == request.resource.data.planGlobalId
+        && publication.data.revision == request.resource.data.sourceRevision
+        && publication.data.contentChecksum == request.resource.data.planChecksum
+        && publication.data.payload.destinationApplication == "HUMAN_STRENGTH"
+        && publication.data.payload.workoutVersionIds == request.resource.data.workoutVersionIds;
+    }
 
     match /accounts/{uid} {
       allow get: if isAuthenticated() && request.auth.uid == uid;
@@ -328,6 +360,12 @@ service cloud.firestore {
         allow read: if ownsHumanRoot(humanUserId);
         allow create: if ownsHumanRoot(humanUserId)
           && validWorkoutDeliveryAck(humanUserId, acknowledgementId);
+        allow update, delete: if false;
+      }
+      match /planDeliveryAcks/{acknowledgementId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if ownsHumanRoot(humanUserId)
+          && validPlanDeliveryAck(humanUserId, acknowledgementId);
         allow update, delete: if false;
       }
       match /processedCommands/{document} { allow read, write: if ownsHumanRoot(humanUserId); }

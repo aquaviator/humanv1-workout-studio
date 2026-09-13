@@ -28,6 +28,8 @@ declare global {
 export class SyncManager {
   private isOnline = navigator.onLine;
   private subscribers = new Set<Subscriber>();
+  private syncInFlight: Promise<void> | null = null;
+  private syncRequested = false;
 
   constructor() {
     window.addEventListener('online', () => {
@@ -69,6 +71,21 @@ export class SyncManager {
 
   async syncPending(): Promise<void> {
     if (!this.isOnline) return;
+    if (this.syncInFlight) {
+      this.syncRequested = true;
+      return this.syncInFlight;
+    }
+    this.syncInFlight = (async () => {
+      do {
+        this.syncRequested = false;
+        await this.syncPendingOnce();
+      } while (this.syncRequested && this.isOnline);
+    })();
+    try { await this.syncInFlight; }
+    finally { this.syncInFlight = null; }
+  }
+
+  private async syncPendingOnce(): Promise<void> {
     const allKeys = await keys();
     const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('sync_'));
     for (const key of syncKeys) {

@@ -7,14 +7,14 @@ const configuredJava = process.env.JAVA_HOME;
 const fallbackJava = 'C:\\Program Files\\Android\\Android Studio\\jbr';
 const javaHome = configuredJava && existsSync(join(configuredJava, 'bin', 'java.exe')) ? configuredJava : fallbackJava;
 if (!existsSync(join(javaHome, 'bin', 'java.exe'))) throw new Error('Java 21 is required for isolated browser emulators');
-const shortTemp = resolve('.tmp-browser');
+const shortTemp = join(process.env.TEMP ?? resolve('.tmp-browser'), 'hv1-browser-emulator');
 mkdirSync(shortTemp, { recursive: true });
 
 const firebaseBin = join(process.cwd(), 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
 const child = spawn(process.execPath, [firebaseBin, 'emulators:start', '--only', 'auth,firestore', '--project', projectId], {
   env: {
     ...process.env, JAVA_HOME: javaHome, TEMP: shortTemp, TMP: shortTemp,
-    JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS ?? ''} -Djava.io.tmpdir=${shortTemp} -Djava.net.preferIPv4Stack=true`.trim(),
+    JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS ?? ''} -Djava.io.tmpdir="${shortTemp}" -Djava.net.preferIPv4Stack=true`.trim(),
     PATH: `${join(javaHome, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
   },
   stdio: 'inherit',

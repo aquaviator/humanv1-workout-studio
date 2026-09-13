@@ -9,7 +9,15 @@ type CloudDoc = Record<string, unknown>;
 type Reader = (owner: string, collectionName: string) => Promise<CloudDoc[]>;
 type Writer = (owner: string, collectionName: string, id: string, value: CloudDoc) => Promise<void>;
 export interface CrossAppConflict { owner: string; collectionName: string; id: string; base: CloudDoc; studio: CloudDoc; app: CloudDoc; resolvedRevision?: number }
+export interface PublishedPlanProjection {
+  planVersionId: string;
+  planChecksum: string;
+  planRevision: number;
+  workoutVersionIds: string[];
+  destinationApplication: "HUMAN_STRENGTH";
+}
 interface PendingWrite { owner: string; collectionName: string; id: string; value: CloudDoc; base: CloudDoc }
+interface ProjectionWrite { collectionName: string; id: string; value: CloudDoc; base: CloudDoc }
 
 const PRIVATE_PREFIX = "private_";
 const clientId = "WORKOUT_STUDIO";
@@ -70,14 +78,44 @@ export class CrossAppRepository {
     }
   }
 
+  private async durablePlanProjection(owner: string, writes: ProjectionWrite[]): Promise<boolean> {
+    for (const item of writes) await set(pendingKey(owner, item.collectionName, item.id), { owner, ...item } satisfies PendingWrite);
+    if (!this.online()) return false;
+    if (this.write !== defaultWrite) {
+      for (const item of writes) await this.durableWrite(owner, item.collectionName, item.id, item.value, item.base);
+      return true;
+    }
+    await runTransaction(db, async transaction => {
+      const entries = await Promise.all(writes.map(async item => ({ item, snapshot: await transaction.get(doc(db, "users", owner, item.collectionName, item.id)) })));
+      for (const { item, snapshot } of entries) {
+        if (!snapshot.exists()) continue;
+        const remote = snapshot.data();
+        if (remote.humanUserId !== owner) throw new Error("OWNERSHIP_CONFLICT");
+        const remoteRevision = asNumber(remote.revision); const nextRevision = asNumber(item.value.revision);
+        if (remoteRevision > nextRevision) throw new Error("REVISION_CONFLICT");
+        if (remoteRevision === nextRevision && JSON.stringify(remote) !== JSON.stringify(item.value)) throw new Error("REVISION_COLLISION");
+      }
+      for (const { item, snapshot } of entries) if (!snapshot.exists() || asNumber(snapshot.data().revision) < asNumber(item.value.revision)) transaction.set(snapshot.ref, item.value);
+    });
+    for (const item of writes) await del(pendingKey(owner, item.collectionName, item.id));
+    return true;
+  }
+
   async replayPending(owner: string): Promise<number> {
     if (!this.online()) return 0;
     let applied = 0;
     const prefix = `crossapp_pending_${owner}_`;
+    const planGroups = new Map<string, PendingWrite[]>();
+    const ordinary: PendingWrite[] = [];
     for (const key of (await keys()).filter(key => typeof key === "string" && key.startsWith(prefix))) {
       const pending = await get<PendingWrite>(key as string); if (!pending || pending.owner !== owner) continue;
-      await this.durableWrite(owner, pending.collectionName, pending.id, pending.value, pending.base); applied++;
+      const planVersionId = asString((pending.value.extensions as CloudDoc | undefined)?.planVersionId);
+      if (planVersionId && (pending.collectionName === "trainingPlans" || pending.collectionName === "plannedWorkouts")) {
+        const group = planGroups.get(planVersionId) || []; group.push(pending); planGroups.set(planVersionId, group);
+      } else ordinary.push(pending);
     }
+    for (const group of planGroups.values()) { await this.durablePlanProjection(owner, group); applied += group.length; }
+    for (const pending of ordinary) { await this.durableWrite(owner, pending.collectionName, pending.id, pending.value, pending.base); applied++; }
     return applied;
   }
 
@@ -258,17 +296,39 @@ export class CrossAppRepository {
     });
   }
 
-  async saveAppPlan(owner: string, plan: Plan): Promise<void> {
+  async deliverPublishedPlan(owner: string, plan: Plan, publication: PublishedPlanProjection): Promise<{ queued: boolean; occurrences: number }> {
+    if (!owner || publication.destinationApplication !== "HUMAN_STRENGTH") throw new Error("INVALID_PLAN_DESTINATION");
+    if (!/^[0-9a-f]{64}$/.test(publication.planChecksum) || publication.planRevision < 1) throw new Error("INVALID_PLAN_PUBLICATION");
+    const placements = plan.weeks.flatMap(week => week.placements.map(placement => ({ week, placement })));
+    if (!plan.startDate || !plan.timezone || placements.length === 0) throw new Error("INCOMPLETE_PLAN_SCHEDULE");
+    const dependencySet = new Set(publication.workoutVersionIds);
+    if (placements.some(({ placement }) => !placement.workoutVersionId || !dependencySet.has(placement.workoutVersionId))) throw new Error("MISSING_WORKOUT_DEPENDENCY");
     const now = Date.now();
-    const existing = this.online() ? (await this.read(owner, "trainingPlans")).find(item => item.globalId === plan.planId) : undefined;
-    const revision = asNumber(existing?.revision) + 1 || 1;
-    const placements = plan.weeks.flatMap(week => week.placements);
-    const first = placements[0];
-    await this.durableWrite(owner, "trainingPlans", plan.planId, { schemaVersion: 1, globalId: plan.planId, humanUserId: owner, templateGlobalId: first?.workoutId || "", routineName: plan.title, firstEpochDay: Math.floor(Date.now() / 86400000), preferredMinuteOfDay: first?.preferredMinuteOfDay ?? null, weekdaysMask: placements.reduce((mask, item) => mask | (1 << Math.max(0, item.dayOfWeek - 1)), 0), recurrenceEndEpochDay: null, createdAt: asNumber(existing?.createdAt, now), updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalPlan: plan } }, existing || {});
-    for (const [weekIndex, week] of plan.weeks.entries()) for (const placement of week.placements) {
-      const scheduledEpochDay = Math.floor(Date.now() / 86400000) + weekIndex * 7 + Math.max(0, placement.dayOfWeek - 1);
-      await this.durableWrite(owner, "plannedWorkouts", placement.placementId, { schemaVersion: 1, globalId: placement.placementId, humanUserId: owner, seriesId: plan.planId, templateGlobalId: placement.workoutId, routineName: plan.title, scheduledEpochDay, originalEpochDay: scheduledEpochDay, preferredMinuteOfDay: placement.preferredMinuteOfDay, status: "PLANNED", completedAt: null, linkedSessionId: null, reminderEnabled: placement.reminderEnabled, detachedFromSeries: false, createdAt: now, updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { workoutVersionId: placement.workoutVersionId, notes: placement.notes } });
+    const [plans, existingOccurrences] = this.online() ? await Promise.all([this.read(owner, "trainingPlans"), this.read(owner, "plannedWorkouts")]) : [[], []];
+    const existing = plans.find(item => item.globalId === plan.planId);
+    const existingContract = existing?.extensions as CloudDoc | undefined;
+    const unchanged = existingContract?.planVersionId === publication.planVersionId && existingContract?.planChecksum === publication.planChecksum;
+    const revision = unchanged ? asNumber(existing?.revision, 1) : asNumber(existing?.revision) + 1 || 1;
+    const startEpochDay = Math.floor(Date.parse(`${plan.startDate}T00:00:00Z`) / 86400000);
+    if (!Number.isFinite(startEpochDay)) throw new Error("INVALID_PLAN_START_DATE");
+    const first = placements[0].placement;
+    const writes: ProjectionWrite[] = [];
+    if (!unchanged) writes.push({ collectionName: "trainingPlans", id: plan.planId, value: { schemaVersion: 1, globalId: plan.planId, humanUserId: owner, templateGlobalId: first.workoutId, routineName: plan.title, firstEpochDay: startEpochDay, preferredMinuteOfDay: first.preferredMinuteOfDay, weekdaysMask: placements.reduce((mask, item) => mask | (1 << Math.max(0, item.placement.dayOfWeek - 1)), 0), recurrenceEndEpochDay: startEpochDay + plan.weeks.length * 7 - 1, createdAt: asNumber(existing?.createdAt, now), updatedAt: now, revision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { canonicalPlan: plan, planVersionId: publication.planVersionId, planChecksum: publication.planChecksum, planRevision: publication.planRevision, workoutVersionIds: [...dependencySet].sort(), timezone: plan.timezone, destinationApplication: publication.destinationApplication } }, base: existing || {} });
+    for (const { week, placement } of placements) {
+      const id = `${plan.planId}:${placement.placementId}`;
+      const prior = existingOccurrences.find(item => asString(item.globalId, asString(item.__id)) === id);
+      const scheduledEpochDay = typeof placement.scheduledEpochDay === "number" ? placement.scheduledEpochDay : startEpochDay + (week.weekNumber - 1) * 7 + Math.max(0, placement.dayOfWeek - 1);
+      const priorExtensions = prior?.extensions as CloudDoc | undefined;
+      if (prior && priorExtensions?.planVersionId === publication.planVersionId) {
+        if (priorExtensions.workoutVersionId !== placement.workoutVersionId || asNumber(prior.scheduledEpochDay) !== scheduledEpochDay) throw new Error("OCCURRENCE_VERSION_CONFLICT");
+        continue;
+      }
+      if (prior && (prior.status === "COMPLETED" || prior.status === "SKIPPED" || prior.detachedFromSeries === true)) continue;
+      const occurrenceRevision = asNumber(prior?.revision) + 1 || 1;
+      writes.push({ collectionName: "plannedWorkouts", id, value: { schemaVersion: 1, globalId: id, humanUserId: owner, seriesId: plan.planId, templateGlobalId: placement.workoutId, routineName: plan.title, scheduledEpochDay, originalEpochDay: asNumber(prior?.originalEpochDay, scheduledEpochDay), preferredMinuteOfDay: placement.preferredMinuteOfDay, status: "PLANNED", completedAt: null, linkedSessionId: null, reminderEnabled: placement.reminderEnabled, detachedFromSeries: false, createdAt: asNumber(prior?.createdAt, now), updatedAt: now, revision: occurrenceRevision, deletedAt: null, originDeviceId: clientId, originApplication: clientId, extensions: { workoutVersionId: placement.workoutVersionId, planVersionId: publication.planVersionId, planChecksum: publication.planChecksum, planRevision: publication.planRevision, placementId: placement.placementId, notes: placement.notes, timezone: plan.timezone } }, base: prior || {} });
     }
+    const applied = writes.length === 0 || await this.durablePlanProjection(owner, writes);
+    return { queued: !applied, occurrences: placements.length };
   }
 }
 

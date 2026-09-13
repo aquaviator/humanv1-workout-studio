@@ -10,12 +10,13 @@ import { syncManager } from '../SyncManager';
 import { publicationRepository } from '../PublicationRepository';
 import { auth, db } from '../../config/firebase';
 import { signOut, signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { WorkoutLibraryRepository } from '../WorkoutLibraryRepository';
 import { deliveryAcknowledgementRepository } from '../DeliveryAcknowledgementRepository';
 
 import { catalogueChecksum } from '../FirebaseCatalogueRepository';
 import { Workout } from '../../domain/types';
+import { crossAppRepository } from '../CrossAppRepository';
 
 const validWorkout = (workoutId: string, title: string): Workout => ({
   schemaVersion: 'humanv1.workout/1', workoutId, title, discipline: 'STRENGTH', catalogueReleaseId: 'v1', tags: [],
@@ -235,6 +236,39 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
     expect(auth.currentUser?.uid).toBe('auth_2');
     expect((await new FirebaseEntitlementRepository().getEntitlement('human_2')).state).toBe('VERIFICATION_UNAVAILABLE');
+  });
+
+  it('serialized two-week plan projection and exact HumanV1 acknowledgement journey', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+    await clear();
+    const workoutA = await publicationRepository.publish('human_1', 'workout', 'journey-workout-a', validWorkout('journey-workout-a', 'Strength A'));
+    const workoutB = await publicationRepository.publish('human_1', 'workout', 'journey-workout-b', { ...validWorkout('journey-workout-b', 'Hybrid B'), discipline: 'HYBRID' });
+    const plan: import('../../domain/types').Plan = { schemaVersion: 'humanv1.plan/1', planId: 'journey-plan', title: 'Two week journey', description: '',
+      startDate: '2026-09-14', timezone: 'Europe/London', destinationApplication: 'HUMAN_STRENGTH', workoutVersionIds: [workoutA.versionId, workoutB.versionId].sort(), weeks: [
+        { weekId: 'week-1', weekNumber: 1, label: 'Week 1', placements: [
+          { placementId: 'p1', dayOfWeek: 1, workoutId: workoutA.globalId, workoutVersionId: workoutA.versionId, preferredMinuteOfDay: 540, reminderEnabled: true, notes: 'Synthetic note' },
+          { placementId: 'p2', dayOfWeek: 3, workoutId: workoutB.globalId, workoutVersionId: workoutB.versionId, preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] },
+        { weekId: 'week-2', weekNumber: 2, label: 'Week 2', placements: [
+          { placementId: 'p3', dayOfWeek: 1, workoutId: workoutA.globalId, workoutVersionId: workoutA.versionId, preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] },
+      ] };
+    const planPublication = await publicationRepository.publish('human_1', 'plan', plan.planId, plan);
+    await syncManager.syncPending();
+    const projection = await crossAppRepository.deliverPublishedPlan('human_1', plan, { planVersionId: planPublication.versionId,
+      planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision,
+      workoutVersionIds: plan.workoutVersionIds!, destinationApplication: 'HUMAN_STRENGTH' });
+    expect(projection).toEqual({ queued: false, occurrences: 3 });
+    expect((await getDocs(collection(db, 'users', 'human_1', 'plannedWorkouts'))).docs.filter(item => item.id.startsWith('journey-plan:'))).toHaveLength(3);
+    const ackId = 'strength-plan-journey';
+    await setDoc(doc(db, 'users', 'human_1', 'planDeliveryAcks', ackId), { schemaVersion: 1, acknowledgementId: ackId,
+      humanUserId: 'human_1', planGlobalId: plan.planId, planVersionId: planPublication.versionId,
+      planChecksum: planPublication.contentChecksum, applicationId: 'HUMAN_STRENGTH', sourceRevision: planPublication.revision,
+      workoutVersionIds: plan.workoutVersionIds, state: 'APPLIED', reasonCode: null, clientAppliedAtMillis: Date.now(), createdAt: serverTimestamp() });
+    await expect(deliveryAcknowledgementRepository.findExactPlan('human_1', { planGlobalId: plan.planId,
+      planVersionId: planPublication.versionId, planChecksum: planPublication.contentChecksum,
+      sourceRevision: planPublication.revision, workoutVersionIds: plan.workoutVersionIds! })).resolves.toMatchObject({ state: 'APPLIED' });
+    await expect(crossAppRepository.deliverPublishedPlan('human_1', plan, { planVersionId: planPublication.versionId,
+      planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision,
+      workoutVersionIds: plan.workoutVersionIds!, destinationApplication: 'HUMAN_STRENGTH' })).resolves.toEqual({ queued: false, occurrences: 3 });
   });
 
   it('Workout round trip, Conflict isolation, Offline creation', async () => {

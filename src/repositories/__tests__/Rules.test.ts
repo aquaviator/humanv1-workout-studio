@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { initializeTestEnvironment, RulesTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, serverTimestamp } from 'firebase/firestore';
 
 let testEnv: RulesTestEnvironment;
 const draft = (humanUserId: string, globalId: string, revision: number) => ({
@@ -11,7 +11,7 @@ const draft = (humanUserId: string, globalId: string, revision: number) => ({
 });
 const published = (humanUserId: string, globalId: string, contentType: 'workout' | 'plan' | 'protocol') => ({
   schemaVersion: `humanv1.${contentType}/1`, globalId, humanUserId, revision: 1, publicationState: 'PUBLISHED', tombstoneState: 'ACTIVE',
-  sourceDraftId: globalId, payload: contentType === 'plan' ? { weeks: [{ placements: [{ workoutVersionId: 'workout-1_r1_aaaaaaaaaaaa' }] }] } : {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  sourceDraftId: globalId, payload: contentType === 'plan' ? { destinationApplication: 'HUMAN_STRENGTH', workoutVersionIds: ['workout-1_r1_aaaaaaaaaaaa'], weeks: [{ placements: [{ workoutVersionId: 'workout-1_r1_aaaaaaaaaaaa' }] }] } : {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   publishedAt: '2026-01-01T00:00:00.000Z', contentChecksum: 'a'.repeat(64), versionId: `${globalId}_v1`, contentType, compatibleTags: [],
 });
 
@@ -110,6 +110,22 @@ describe('Firestore Security Rules', () => {
     await assertFails(setDoc(doc(base, 'bad-checksum'), { ...valid, versionId: 'bad-checksum', contentChecksum: 'short' }));
     await assertFails(setDoc(doc(base, 'bad-checksum-alphabet'), { ...valid, versionId: 'bad-checksum-alphabet', contentChecksum: 'z'.repeat(64) }));
     await assertFails(setDoc(doc(base, 'bad-state-pair'), { ...valid, versionId: 'bad-state-pair', publicationState: 'PUBLISHED', tombstoneState: 'SOFT_DELETED' }));
+  });
+
+  it('governs immutable exact plan acknowledgements and denies wrong owner or checksum', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
+    const publication = published('human_1', 'plan-ack', 'plan');
+    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'publishedPlans', publication.versionId), publication));
+    const acknowledgement = { schemaVersion: 1, acknowledgementId: 'ack-plan-1', humanUserId: 'human_1',
+      planGlobalId: 'plan-ack', planVersionId: publication.versionId, planChecksum: publication.contentChecksum,
+      applicationId: 'HUMAN_STRENGTH', sourceRevision: 1, workoutVersionIds: ['workout-1_r1_aaaaaaaaaaaa'],
+      state: 'APPLIED', reasonCode: null, clientAppliedAtMillis: 1, createdAt: serverTimestamp() };
+    const ref = doc(alice, 'users', 'human_1', 'planDeliveryAcks', 'ack-plan-1');
+    await assertSucceeds(setDoc(ref, acknowledgement));
+    await assertFails(updateDoc(ref, { state: 'REJECTED' }));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDeliveryAcks', 'bad-checksum'), { ...acknowledgement, acknowledgementId: 'bad-checksum', planChecksum: 'b'.repeat(64), createdAt: serverTimestamp() }));
+    await assertFails(getDoc(doc(bob, 'users', 'human_1', 'planDeliveryAcks', 'ack-plan-1')));
   });
   
   // 1. Identity mapping is client read-only.

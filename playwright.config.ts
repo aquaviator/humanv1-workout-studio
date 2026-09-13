@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 const demoProject = 'demo-humanv1-workout-studio';
 if (!demoProject.startsWith('demo-')) throw new Error('Browser acceptance must use a demo Firebase project');
+const productionBuildJourney = process.env.HV1_BROWSER_PRODUCTION_BUILD === 'true';
 
 export default defineConfig({
   testDir: './e2e',
@@ -26,7 +27,9 @@ export default defineConfig({
       timeout: 90_000,
     },
     {
-      command: 'npx cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=browser-owner@example.test VITE_FIREBASE_TEST_PASSWORD=browser-password-123 vite --host 127.0.0.1 --port 4173',
+      command: productionBuildJourney
+        ? 'npx cross-env HV1_ISOLATED_BROWSER_BUILD=true vite preview --host 127.0.0.1 --port 4173'
+        : 'npx cross-env VITE_USE_FIREBASE_EMULATOR=true VITE_FIREBASE_PROJECT_ID=demo-humanv1-workout-studio VITE_FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9098 VITE_FIREBASE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 VITE_FIREBASE_TEST_EMAIL=browser-owner@example.test VITE_FIREBASE_TEST_PASSWORD=browser-password-123 vite --host 127.0.0.1 --port 4173',
       port: 4173,
       reuseExistingServer: false,
       timeout: 60_000,

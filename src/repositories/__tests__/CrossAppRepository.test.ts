@@ -61,6 +61,38 @@ describe("CrossAppRepository", () => {
     expect(plan.weeks[0].placements[0]).toMatchObject({ placementId: "occurrence_1", workoutId: "routine_1", reminderEnabled: true });
   });
 
+  it("projects an immutable two-week plan idempotently and preserves completed history", async () => {
+    const records: Record<string, Record<string, unknown>[]> = { trainingPlans: [], plannedWorkouts: [] };
+    const writes: string[] = [];
+    const repo = new CrossAppRepository(async (_owner, name) => records[name] || [], async (_owner, name, id, value) => {
+      writes.push(`${name}/${id}`); const target = records[name] ||= []; const index = target.findIndex(item => item.globalId === id);
+      if (index >= 0) target[index] = value; else target.push(value);
+    }, () => true);
+    const plan = { schemaVersion: "humanv1.plan/1", planId: "plan_1", title: "Two weeks", description: "", startDate: "2026-09-14", timezone: "Europe/London", weeks: [
+      { weekId: "w1", weekNumber: 1, label: "Week 1", placements: [
+        { placementId: "p1", dayOfWeek: 1, workoutId: "a", workoutVersionId: "a_r1_hash", preferredMinuteOfDay: 540, reminderEnabled: true, notes: "note" },
+        { placementId: "p2", dayOfWeek: 3, workoutId: "b", workoutVersionId: "b_r1_hash", preferredMinuteOfDay: null, reminderEnabled: false, notes: "" }] },
+      { weekId: "w2", weekNumber: 2, label: "Week 2", placements: [
+        { placementId: "p3", dayOfWeek: 1, workoutId: "a", workoutVersionId: "a_r1_hash", preferredMinuteOfDay: null, reminderEnabled: false, notes: "" }] },
+    ] };
+    const publication = { planVersionId: "plan_1_r1_hash", planChecksum: "a".repeat(64), planRevision: 1, workoutVersionIds: ["a_r1_hash", "b_r1_hash"], destinationApplication: "HUMAN_STRENGTH" as const };
+    expect(await repo.deliverPublishedPlan("human_1", plan, publication)).toEqual({ queued: false, occurrences: 3 });
+    expect(writes).toHaveLength(4);
+    await repo.deliverPublishedPlan("human_1", plan, publication);
+    expect(writes).toHaveLength(4);
+    records.plannedWorkouts[0] = { ...records.plannedWorkouts[0], status: "COMPLETED", scheduledEpochDay: 1 };
+    await repo.deliverPublishedPlan("human_1", { ...plan, weeks: [{ ...plan.weeks[0], placements: [{ ...plan.weeks[0].placements[0], dayOfWeek: 2 }, plan.weeks[0].placements[1]] }, plan.weeks[1]] }, { ...publication, planVersionId: "plan_1_r2_hash", planRevision: 2, planChecksum: "b".repeat(64) });
+    expect(records.plannedWorkouts[0]).toMatchObject({ status: "COMPLETED", scheduledEpochDay: 1 });
+
+    await clear(); let online = false; const replayed: string[] = [];
+    const offlineRepo = new CrossAppRepository(async () => [], async (_owner, name, id) => { replayed.push(`${name}/${id}`); }, () => online);
+    expect((await offlineRepo.deliverPublishedPlan("human_1", plan, publication)).queued).toBe(true);
+    online = true;
+    expect(await offlineRepo.replayPending("human_1")).toBe(4);
+    expect(await offlineRepo.replayPending("human_1")).toBe(0);
+    expect(new Set(replayed).size).toBe(4);
+  });
+
   it("distinguishes missing and tombstoned workout parents during plan reconstruction", async () => {
     const records: Record<string, Record<string, unknown>[]> = {
       trainingPlans: [{ globalId: "plan_1", humanUserId: "human_1", routineName: "Plan", deletedAt: null }],

@@ -143,6 +143,8 @@ export interface Plan {
   startDate?: string;
   endDate?: string;
   timezone?: string;
+  destinationApplication?: "HUMAN_STRENGTH";
+  workoutVersionIds?: StableId[];
   weeks: PlanWeek[];
   notes?: string;
   reconstructionDiagnostics?: ReconstructionDiagnostic[];

@@ -1,6 +1,6 @@
 import { PublishedEnvelope } from "../../domain/publication";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate, useLocation } from "react-router";
 import React, { useState, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { format, addDays, startOfWeek } from "date-fns";
@@ -18,9 +18,13 @@ import { AlertCircle } from "lucide-react";
 import { crossAppRepository } from "../../repositories/CrossAppRepository";
 import { PlanReconstructionStatus, PlacementReconstructionStatus } from "../components/PlanReconstructionStatus";
 import { publicationBlockReason } from "../../domain/presentation";
+import { planDeliveryRepository, PlanDeliveryAttempt, PlanDeliveryPhase } from "../../repositories/PlanDeliveryRepository";
+import { deliveryAcknowledgementRepository } from "../../repositories/DeliveryAcknowledgementRepository";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
   React.useEffect(() => { 
@@ -33,7 +37,11 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       setWorkoutsLoaded(true);
     }); 
   }, [identity.humanUserId]);
-  const [planId] = useState(() => routePlanId || uuidv4());
+  const [planId] = useState(() => routePlanId && routePlanId !== 'new' ? routePlanId : uuidv4());
+
+  useEffect(() => {
+    if (location.pathname === '/plans/new') navigate(`/plans/${planId}`, { replace: true });
+  }, [location.pathname, navigate, planId]);
   
   const initialPlan: Plan = {
     schemaVersion: "1",
@@ -86,10 +94,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     let timeout: ReturnType<typeof setTimeout>;
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
-      draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => {
-        void crossAppRepository.saveAppPlan(identity.humanUserId, plan).catch(() => undefined);
-        setSaveStatus("Saved");
-      }).catch(() => setSaveStatus("Unsaved"));
+      draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => setSaveStatus("Saved")).catch(() => setSaveStatus("Unsaved"));
     }, 500);
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading, validationErrors.length]);
@@ -100,6 +105,44 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
   const [draftDependencies, setDraftDependencies] = useState<Workout[]>([]);
   const [publishStatus, setPublishStatus] = useState<string>("");
+  const [deliveryAttempt, setDeliveryAttempt] = useState<PlanDeliveryAttempt | null>(null);
+
+  const recordDelivery = async (phase: PlanDeliveryPhase, details: Partial<PlanDeliveryAttempt> = {}) => {
+    const attempt: PlanDeliveryAttempt = {
+      humanUserId: identity.humanUserId,
+      planId: plan.planId,
+      workoutVersionIds: details.workoutVersionIds ?? deliveryAttempt?.workoutVersionIds ?? [],
+      planVersionId: details.planVersionId ?? deliveryAttempt?.planVersionId,
+      planChecksum: details.planChecksum ?? deliveryAttempt?.planChecksum,
+      planRevision: details.planRevision ?? deliveryAttempt?.planRevision,
+      phase,
+      lastAttemptedAt: new Date().toISOString(),
+      ...(details.failureCategory ? { failureCategory: details.failureCategory } : {}),
+    };
+    setDeliveryAttempt(attempt);
+    await planDeliveryRepository.save(attempt);
+  };
+
+  useEffect(() => {
+    void planDeliveryRepository.load(identity.humanUserId, plan.planId).then(setDeliveryAttempt);
+  }, [identity.humanUserId, plan.planId]);
+
+  useEffect(() => {
+    if (deliveryAttempt?.phase !== 'WAITING_FOR_HUMANV1' || !deliveryAttempt.planVersionId || !deliveryAttempt.planChecksum || !deliveryAttempt.planRevision) return;
+    let active = true;
+    const check = async () => {
+      const acknowledgement = await deliveryAcknowledgementRepository.findExactPlan(identity.humanUserId, {
+        planGlobalId: plan.planId, planVersionId: deliveryAttempt.planVersionId!, planChecksum: deliveryAttempt.planChecksum!,
+        sourceRevision: deliveryAttempt.planRevision!, workoutVersionIds: deliveryAttempt.workoutVersionIds,
+      }).catch(() => null);
+      if (!active || !acknowledgement) return;
+      if (acknowledgement.state === 'APPLIED') await recordDelivery('AVAILABLE_IN_HUMANV1');
+      else if (acknowledgement.state === 'CONFLICT') await recordDelivery('CONFLICT', { failureCategory: acknowledgement.reasonCode ?? 'Plan conflict' });
+      else await recordDelivery('PARTIALLY_DELIVERED', { failureCategory: acknowledgement.reasonCode ?? 'Plan rejected' });
+    };
+    void check(); const timer = setInterval(() => void check(), 5000);
+    return () => { active = false; clearInterval(timer); };
+  }, [deliveryAttempt?.phase, deliveryAttempt?.planVersionId, deliveryAttempt?.planChecksum, deliveryAttempt?.planRevision, identity.humanUserId, plan.planId]);
 
   useEffect(() => {
     if (!plan.planId) return;
@@ -114,16 +157,31 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   
   const displayPublishStatus = useMemo(() => {
     if (publishStatus) return publishStatus;
+    if (deliveryAttempt) {
+      switch (deliveryAttempt.phase) {
+        case 'VALIDATING': return 'Validating plan';
+        case 'PUBLISHING_WORKOUTS': return 'Publishing required workouts';
+        case 'PUBLISHING_PLAN': return 'Publishing plan';
+        case 'QUEUED_OFFLINE': return 'Queued offline—will send when connected';
+        case 'SENDING': return 'Sending to HumanV1';
+        case 'SENT_TO_HUMANV1': return 'Sent to HumanV1 cloud';
+        case 'WAITING_FOR_HUMANV1': return 'Waiting for HumanV1';
+        case 'AVAILABLE_IN_HUMANV1': return 'Available in HumanV1';
+        case 'PARTIALLY_DELIVERED': return 'Partially delivered—needs attention';
+        case 'CONFLICT': return 'Conflict—needs attention';
+        case 'FAILED': return `Retry required: ${deliveryAttempt.failureCategory ?? 'publication failed'}`;
+      }
+    }
     if (!syncRecord) return "Ready";
     switch (syncRecord.status) {
       case 'QUEUED': return "Queued—will send when connected";
       case 'SENDING': return "Sending";
-      case 'SYNCED': return "Available in your apps";
+      case 'SYNCED': return "Sent to HumanV1 cloud";
       case 'CONFLICT': return "Conflict";
       case 'FAILED': return "Retry required";
       default: return "";
     }
-  }, [syncRecord, publishStatus]);
+  }, [deliveryAttempt, syncRecord, publishStatus]);
 
 
   if (isLoading || !workoutsLoaded) {
@@ -134,12 +192,20 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   const handlePublish = async () => {
     try {
-      setPublishStatus("Publishing...");
+      setPublishStatus("");
+      await recordDelivery('VALIDATING');
+      const errors = validatePlan(plan);
+      if (errors.length) throw new Error(errors[0].message);
       
-      const newPlan = JSON.parse(JSON.stringify(plan));
-      
+      const newPlan: Plan = JSON.parse(JSON.stringify(plan));
+      if (!newPlan.startDate) newPlan.startDate = format(weekStart, 'yyyy-MM-dd');
+      if (!newPlan.timezone) newPlan.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const workoutVersions = new Map<string, string>();
+      await recordDelivery('PUBLISHING_WORKOUTS');
       for (const week of newPlan.weeks) {
          for (const placement of week.placements) {
+             const knownVersion = workoutVersions.get(placement.workoutId);
+             if (knownVersion) { placement.workoutVersionId = knownVersion; continue; }
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (!workout) throw new Error(`Missing workout reference`);
              const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
@@ -148,16 +214,47 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
              let pub = pubs.find(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED');
              if (!pub) {
                  pub = await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
+             } else {
+                 await syncManager.queueUpload(pub, 'workout', 'publication');
              }
              placement.workoutVersionId = pub.versionId;
+             workoutVersions.set(placement.workoutId, pub.versionId);
          }
       }
-      
-      await publicationRepository.publishAuthenticated('plan', newPlan.planId, newPlan, ['PLAN']);
-      setIsPublishModalOpen(false);
-      setPublishStatus("");
+      await recordDelivery('PUBLISHING_PLAN', { workoutVersionIds: [...workoutVersions.values()] });
+      newPlan.destinationApplication = 'HUMAN_STRENGTH';
+      newPlan.workoutVersionIds = [...workoutVersions.values()].sort();
+      const planPublication = await publicationRepository.publishAuthenticated('plan', newPlan.planId, newPlan, ['PLAN']);
+      const projection = await crossAppRepository.deliverPublishedPlan(identity.humanUserId, newPlan, {
+        planVersionId: planPublication.versionId,
+        planChecksum: planPublication.contentChecksum,
+        planRevision: planPublication.revision,
+        workoutVersionIds: [...workoutVersions.values()],
+        destinationApplication: 'HUMAN_STRENGTH',
+      });
+      if (!navigator.onLine || projection.queued) {
+        await recordDelivery('QUEUED_OFFLINE', { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId });
+        return;
+      }
+      await recordDelivery('SENDING', { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId });
+      await syncManager.syncPending();
+      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'plan');
+      const current = records.find(record => (record.envelope as PublishedEnvelope<Plan>).versionId === planPublication.versionId);
+      if (current?.status === 'CONFLICT' || current?.status === 'FAILED') throw new Error(current.lastErrorCode ?? 'UPLOAD_FAILED');
+      const details = { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId, planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision };
+      await recordDelivery('SENT_TO_HUMANV1', details);
+      const acknowledgement = await deliveryAcknowledgementRepository.findExactPlan(identity.humanUserId, {
+        planGlobalId: newPlan.planId, planVersionId: planPublication.versionId,
+        planChecksum: planPublication.contentChecksum, sourceRevision: planPublication.revision,
+        workoutVersionIds: [...workoutVersions.values()],
+      });
+      if (acknowledgement?.state === 'APPLIED') await recordDelivery('AVAILABLE_IN_HUMANV1', details);
+      else if (acknowledgement?.state === 'CONFLICT') await recordDelivery('CONFLICT', { ...details, failureCategory: acknowledgement.reasonCode ?? 'Plan conflict' });
+      else if (acknowledgement?.state === 'REJECTED') await recordDelivery('PARTIALLY_DELIVERED', { ...details, failureCategory: acknowledgement.reasonCode ?? 'Plan rejected' });
+      else await recordDelivery('WAITING_FOR_HUMANV1', details);
     } catch (error: unknown) {
-      setPublishStatus(`Error: ${error instanceof Error ? error.message : 'Publication failed'}`);
+      const category = error instanceof Error ? error.message : 'Publication failed';
+      await recordDelivery('FAILED', { failureCategory: category });
     }
   };
 
@@ -168,7 +265,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (workout) {
                  const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
-                 if (pubs.length === 0 || pubs[0].publicationState === 'TOMBSTONED') {
+                 const checksum = await publicationRepository.generateChecksum(workout);
+                 if (!pubs.some(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED')) {
                  if (!deps.find(dependency => dependency.workoutId === workout.workoutId)) deps.push(workout);
                  }
              }
@@ -322,14 +420,38 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                         {displayPublishStatus && displayPublishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{displayPublishStatus}</p>}
             <div className="flex justify-end gap-3">
               <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
-              <button onClick={handleOpenPublish} disabled={!!publishStatus} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send</button>
+              <button onClick={handlePublish} disabled={deliveryAttempt?.phase === 'VALIDATING' || deliveryAttempt?.phase === 'PUBLISHING_WORKOUTS' || deliveryAttempt?.phase === 'PUBLISHING_PLAN' || deliveryAttempt?.phase === 'SENDING'} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">{deliveryAttempt?.phase === 'FAILED' ? 'Retry' : 'Send'}</button>
             </div>
+            {deliveryAttempt && (
+              <details className="mt-4 text-xs text-hv-text-muted">
+                <summary className="cursor-pointer">Delivery details</summary>
+                <dl className="mt-2 break-all">
+                  <dt>Entity</dt><dd>Plan</dd>
+                  <dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>
+                  {deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}
+                  <dt>Current phase</dt><dd>{deliveryAttempt.phase}</dd>
+                  <dt>Destination</dt><dd>Human Strength</dd>
+                  <dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd>
+                </dl>
+              </details>
+            )}
           </div>
         </div>
       )}
         </div>
       </div>
       <PlanReconstructionStatus plan={plan} />
+      {deliveryAttempt && (
+        <section className="mx-4 md:mx-8 mt-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4" aria-live="polite" aria-label="Plan delivery status">
+          <h2 className="font-semibold text-hv-text">{displayPublishStatus}</h2>
+          <p className="mt-1 text-sm text-hv-text-muted">Destination: Human Strength</p>
+          {deliveryAttempt.phase === 'FAILED' && <button onClick={handlePublish} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Retry</button>}
+          <details className="mt-3 text-xs text-hv-text-muted">
+            <summary className="cursor-pointer">Delivery details</summary>
+            <dl className="mt-2 break-all"><dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>{deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}<dt>Phase</dt><dd>{deliveryAttempt.phase}</dd><dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd></dl>
+          </details>
+        </section>
+      )}
       
       <div className="px-4 md:px-8 border-b border-hv-border flex items-center justify-between py-2">
         <div className="flex gap-2">

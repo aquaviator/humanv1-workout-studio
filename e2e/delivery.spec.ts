@@ -41,6 +41,26 @@ async function latestPublication() {
   } finally { await deleteApp(app); }
 }
 
+async function planPublications(planId?: string) {
+  const { app, db } = await adminDb();
+  try {
+    const snapshot = await db.collection(`users/${owner}/publishedPlans`).get();
+    return snapshot.docs.map(item => item.data()).filter(item => !planId || item.globalId === planId).sort((a, b) => b.revision - a.revision);
+  } finally { await deleteApp(app); }
+}
+
+async function seedPlanDependencyDraft() {
+  const { app, db } = await adminDb();
+  try {
+    const now = new Date().toISOString();
+    await db.doc(`users/${owner}/workoutDrafts/workout_plan_dependency`).set({
+      schemaVersion: 1, globalId: 'workout_plan_dependency', humanUserId: owner, revision: 1, status: 'DRAFT',
+      createdAt: now, updatedAt: now, deletedAt: null, originClientId: 'browser_fixture',
+      payload: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_plan_dependency', title: 'Browser plan dependency', discipline: 'STRENGTH', catalogueReleaseId: 'browser-catalogue', tags: ['synthetic'], blocks: [{ blockId: 'rest_plan_dependency', type: 'REST', durationSeconds: 60, recoveryType: 'PASSIVE', instructions: 'Synthetic acceptance rest.' }] },
+    });
+  } finally { await deleteApp(app); }
+}
+
 async function writeAck(overrides: Record<string, unknown> = {}) {
   const publication = await latestPublication();
   if (!publication) throw new Error('Publication missing');
@@ -193,5 +213,39 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.goto('/workouts');
     await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
     await expect(page.getByText('Available in your apps')).toHaveCount(0);
+  });
+
+  test('publishes and projects a one-workout plan once while truthfully waiting for the app', async () => {
+    await seedPlanDependencyDraft();
+    await page.goto('/workouts');
+    await expect(page.getByText('Browser plan dependency')).toBeVisible();
+
+    await page.goto('/plans/new', { waitUntil: 'commit' });
+    await expect(page).toHaveURL(/\/plans\/[0-9a-f-]{36}$/);
+    await expect(page.getByLabel('Plan Title')).toBeVisible();
+    await page.getByLabel('Plan Title').fill('Browser plan delivery acceptance');
+    const dependencyCard = page.getByText('Browser plan dependency', { exact: true }).locator('xpath=ancestor::div[contains(@class,"group")][1]');
+    await dependencyCard.getByLabel('Add workout to day').selectOption('1');
+    const planId = new URL(page.url()).pathname.split('/').pop()!;
+    expect(await planPublications()).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Send plan to my apps' }).click();
+    await expect(page.getByText('Workouts that will be published automatically:')).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    expect(await planPublications()).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Send plan to my apps' }).click();
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Waiting for HumanV1' })).toBeVisible();
+    await expect.poll(async () => (await planPublications()).length).toBe(1);
+    const first = (await planPublications())[0];
+    expect(first.globalId).toBe(planId);
+    expect(first.payload.weeks[0].placements[0].workoutVersionId).toMatch(/_r\d+_[a-f0-9]{12}$/);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Waiting for HumanV1' })).toBeVisible();
+    await page.getByRole('button', { name: 'Send plan to my apps' }).click();
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(async () => (await planPublications()).length).toBe(1);
+    await expect(page.getByText(/Available in Human Strength/i)).toHaveCount(0);
   });
 });
