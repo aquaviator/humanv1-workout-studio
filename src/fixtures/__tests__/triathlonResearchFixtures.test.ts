@@ -1,0 +1,9 @@
+import { describe, expect, it } from "vitest";
+import { cloneResearchPlanToDraft, triathlonResearchDataset, triathlonResearchPlans } from "../triathlonResearchFixtures";
+
+describe("triathlon research fixtures", () => {
+  it("matches the independently validated manifest", () => { expect(triathlonResearchDataset.manifest.counts).toMatchObject({ sessionTemplates: 43, plans: 4, weeks: 56, daySlots: 392, totalAssignments: 305, restDaySlots: 95, multiSessionAdditionalAssignments: 8 }); });
+  it("normalizes schedule 1.2 with stable unique assignment IDs", () => { const ids = triathlonResearchPlans.flatMap(p => p.weeks).flatMap(w => w.days).flatMap(d => d.assignments).map(a => a.assignmentId); expect(new Set(ids).size).toBe(305); expect(triathlonResearchDataset.planScheduleSchemaVersion).toBe("1.2"); });
+  it("clones every immutable candidate without mutating it", () => { for (const source of triathlonResearchPlans) { const before = structuredClone(source); const clone = cloneResearchPlanToDraft(source, "human_fixture"); expect(source).toEqual(before); expect(clone.planId).not.toBe(source.planId); expect(clone.weeks).toHaveLength(source.durationWeeks); expect(clone.weeks.flatMap(w => w.placements)).toHaveLength(source.weeks.flatMap(w => w.days).flatMap(d => d.assignments).length); } });
+  it("preserves ordered multi-session days and variable race placeholders", () => { const clone = cloneResearchPlanToDraft(triathlonResearchPlans[3], "human_fixture"); expect(clone.weeks.flatMap(w => w.placements).some((p, i, all) => all.some(q => q !== p && q.dayOfWeek === p.dayOfWeek && q.placementId.split("-").slice(0, -1).join("-") === p.placementId.split("-").slice(0, -1).join("-")))).toBe(true); expect(clone.weeks.flatMap(w => w.placements).find(p => p.workoutId === "race_im")?.notes).toContain("variable-duration"); });
+});

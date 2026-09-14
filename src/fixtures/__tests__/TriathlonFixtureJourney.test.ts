@@ -1,0 +1,21 @@
+import { describe, expect, it } from "vitest";
+import { canonicalChecksum, deterministicOccurrenceId, replaceFutureScheduleOnly } from "../../domain/canonical";
+import { cloneResearchPlanToDraft, triathlonResearchPlans } from "../triathlonResearchFixtures";
+
+class IsolatedTriathlonDemoRepository {
+  readonly library = structuredClone(triathlonResearchPlans);
+  readonly drafts = new Map<string, ReturnType<typeof cloneResearchPlanToDraft>>();
+  readonly publications = new Map<string, { owner: string; versionId: string; checksum: string }>();
+  readonly occurrences = new Map<string, { owner: string; status: string; detachedFromSeries: boolean; workoutVersionId: string }>();
+  readonly acknowledgements = new Map<string, string>();
+  clone(planId: string, owner: string) { const source = this.library.find(item => item.planId === planId)!; const draft = cloneResearchPlanToDraft(source, owner); this.drafts.set(`${owner}:${draft.planId}`, draft); return draft; }
+  publish(draftId: string, owner: string) { const draft = this.drafts.get(`${owner}:${draftId}`); if (!draft) throw new Error("CROSS_OWNER_DENIED"); const checksum = canonicalChecksum(draft); const versionId = `${draft.planId}:v1:${checksum.slice(0, 12)}`; this.publications.set(`${owner}:${versionId}`, { owner, versionId, checksum }); return { versionId, checksum, draft }; }
+  ingest(owner: string, publication: ReturnType<IsolatedTriathlonDemoRepository["publish"]>) { if (!this.publications.has(`${owner}:${publication.versionId}`)) throw new Error("CROSS_OWNER_DENIED"); publication.draft.weeks.forEach((week, wi) => week.placements.forEach(placement => { const id = deterministicOccurrenceId(publication.versionId, placement.placementId, 21000 + wi * 7 + placement.dayOfWeek - 1); if (!this.occurrences.has(id)) this.occurrences.set(id, { owner, status: "PLANNED", detachedFromSeries: false, workoutVersionId: placement.workoutVersionId }); })); const acknowledgement = `APPLIED:${publication.versionId}:${publication.checksum}`; this.acknowledgements.set(`${owner}:${publication.versionId}`, acknowledgement); return acknowledgement; }
+  available(owner: string, versionId: string, checksum: string) { return this.acknowledgements.get(`${owner}:${versionId}`) === `APPLIED:${versionId}:${checksum}`; }
+}
+
+describe("isolated triathlon fixture publication journey", () => {
+  it("loads, displays and clones all plans without mutating governed candidates", () => { const repo = new IsolatedTriathlonDemoRepository(); const before = structuredClone(repo.library); expect(repo.library.map(p => p.name)).toEqual(["First Half Ironman", "Intermediate Half Ironman", "First Ironman", "Intermediate Ironman"]); for (const plan of repo.library) expect(repo.clone(plan.planId, "human_a").weeks).toHaveLength(plan.durationWeeks); expect(repo.library).toEqual(before); });
+  it("publishes, ingests, exactly acknowledges and replays without duplicates", () => { const repo = new IsolatedTriathlonDemoRepository(); const draft = repo.clone("intermediate-ironman-16-week", "human_a"); const publication = repo.publish(draft.planId, "human_a"); expect(repo.available("human_a", publication.versionId, publication.checksum)).toBe(false); const firstAck = repo.ingest("human_a", publication); const occurrenceCount = repo.occurrences.size; expect(repo.available("human_a", publication.versionId, publication.checksum)).toBe(true); expect(firstAck).toBe(`APPLIED:${publication.versionId}:${publication.checksum}`); expect(repo.ingest("human_a", publication)).toBe(firstAck); expect(repo.publications.size).toBe(1); expect(repo.occurrences.size).toBe(occurrenceCount); expect(repo.acknowledgements.size).toBe(1); });
+  it("preserves execution history during an eligible future edit and denies cross-owner access", () => { const repo = new IsolatedTriathlonDemoRepository(); const draft = repo.clone("first-half-ironman-12-week", "human_a"); expect(() => repo.publish(draft.planId, "human_b")).toThrow("CROSS_OWNER_DENIED"); const history = [{ status: "COMPLETED", workoutVersionId: "v1" }, { status: "SKIPPED", workoutVersionId: "v1" }, { status: "PLANNED", detachedFromSeries: true, workoutVersionId: "v1" }, { status: "PLANNED", workoutVersionId: "v1" }]; expect(replaceFutureScheduleOnly(history, "v2").map(item => item.workoutVersionId)).toEqual(["v1", "v1", "v1", "v2"]); });
+});
