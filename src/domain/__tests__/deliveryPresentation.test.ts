@@ -18,6 +18,12 @@ describe('truthful workout delivery presentation', () => {
     const sent = presentWorkoutDelivery({ workout, syncRecord: sync('SYNCED'), acknowledgements: [] });
     expect(sent?.phase).toBe('SENT_TO_HUMANV1'); expect(sent?.title).not.toContain('Available in your apps');
   });
+  it('does not turn an acknowledgement read failure into a false not-received claim', () => {
+    const result = presentWorkoutDelivery({ workout, syncRecord: sync('SYNCED'), acknowledgements: [], acknowledgementVerificationFailed: true });
+    expect(result?.title).toBe('Delivery verification unavailable');
+    expect(result?.phase).toBe('RETRY_REQUIRED');
+    expect(result?.destinations.every(destination => destination.state === 'NOT_YET_RECEIVED')).toBe(true);
+  });
   it('accepts only an acknowledgement matching owner, workout, version and checksum', () => {
     for (const bad of [{ humanUserId: 'other' }, { workoutGlobalId: 'other' }, { versionId: 'other' }, { appliedChecksum: 'other' }])
       expect(presentWorkoutDelivery({ workout, syncRecord: sync('SYNCED'), acknowledgements: [ack(bad)] })?.phase).toBe('SENT_TO_HUMANV1');

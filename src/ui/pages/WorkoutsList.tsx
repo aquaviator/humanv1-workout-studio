@@ -175,7 +175,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
             <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
               <div className="flex justify-between items-start mb-2">
                 <h2 
-                  className="font-semibold cursor-pointer hover:text-hv-primary" 
+                  className={cn("font-semibold", env && "cursor-pointer hover:text-hv-primary")}
                   onClick={() => env && !env.deletedAt && navigate(`/workouts/${workout.workoutId}`)}
                 >
                   {workout.title}
@@ -228,6 +228,11 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                 </span>
               </div>
               <ReconstructionDiagnostics diagnostics={item.diagnostics} />
+              {!env && !item.latestVersion && (
+                <button type="button" onClick={() => handleDuplicate(workout)} className="mt-3 rounded border border-hv-primary px-3 py-2 text-sm font-medium text-hv-primary hover:bg-hv-surface-2">
+                  Copy to Studio to edit
+                </button>
+              )}
               <div className="mt-3"><WorkoutDeliveryStatus delivery={delivery} /></div>
             </div>
           );

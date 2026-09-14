@@ -53,6 +53,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
   const [deliveries, setDeliveries] = useState<DeliveryAcknowledgement[]>([]);
+  const [acknowledgementVerificationFailed, setAcknowledgementVerificationFailed] = useState(false);
   const [publishedVersions, setPublishedVersions] = useState<PublishedEnvelope<Workout>[]>([]);
   const [transientPhase, setTransientPhase] = useState<'VALIDATING' | 'PREPARING' | null>(null);
   const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
@@ -76,11 +77,13 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       const record = records.filter(r => (r.envelope as PublishedEnvelope<Workout>).sourceDraftId === workout.workoutId)
         .sort((a, b) => (b.envelope as PublishedEnvelope<Workout>).revision - (a.envelope as PublishedEnvelope<Workout>).revision)[0];
       setSyncRecord(record || null);
-      const [acks, versions] = await Promise.all([
-        deliveryAcknowledgementRepository.listForWorkout(identity.humanUserId, workout.workoutId).catch(() => []),
+      const [ackResult, versions] = await Promise.all([
+        deliveryAcknowledgementRepository.listForWorkout(identity.humanUserId, workout.workoutId)
+          .then(value => ({ value, failed: false })).catch(() => ({ value: null, failed: true })),
         publicationRepository.listPublishedVersions<Workout>(identity.humanUserId, 'workout', workout.workoutId),
       ]);
-      setDeliveries(acks);
+      if (ackResult.value) setDeliveries(ackResult.value);
+      setAcknowledgementVerificationFailed(ackResult.failed);
       setPublishedVersions(versions);
     };
     fetchStatus();
@@ -89,7 +92,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     return () => { unsub(); clearInterval(interval); };
   }, [workout.workoutId, identity.humanUserId]);
   
-  const deliveryPresentation = useMemo(() => presentWorkoutDelivery({ workout, syncRecord, acknowledgements: deliveries, online: navigator.onLine, latestRevision: publishedVersions[0]?.revision, transientPhase }), [workout, syncRecord, deliveries, publishedVersions, transientPhase]);
+  const deliveryPresentation = useMemo(() => presentWorkoutDelivery({ workout, syncRecord, acknowledgements: deliveries, online: navigator.onLine, latestRevision: publishedVersions[0]?.revision, transientPhase, acknowledgementVerificationFailed }), [workout, syncRecord, deliveries, publishedVersions, transientPhase, acknowledgementVerificationFailed]);
 
 
   const validationErrors = useMemo(() => validateWorkout(workout, exercisesData), [workout, exercisesData]);

@@ -1,13 +1,13 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  list: vi.fn(), syncDown: vi.fn(() => Promise.resolve()), subscribe: vi.fn(() => () => undefined),
+  list: vi.fn(), syncDown: vi.fn(() => Promise.resolve()), subscribe: vi.fn(() => () => undefined), saveWorkoutDraft: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('../../../repositories/WorkoutLibraryRepository', () => ({ workoutLibraryRepository: { list: mocks.list } }));
 vi.mock('../../../repositories/SyncManager', () => ({ syncManager: { syncDown: mocks.syncDown, subscribe: mocks.subscribe } }));
-vi.mock('../../../repositories/DraftRepository', () => ({ draftRepository: {} }));
+vi.mock('../../../repositories/DraftRepository', () => ({ draftRepository: { saveWorkoutDraft: mocks.saveWorkoutDraft } }));
 
 import WorkoutsList from '../WorkoutsList';
 
@@ -41,5 +41,18 @@ describe('WorkoutsList cloud hydration', () => {
     render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('last verified cloud status'));
     expect(screen.getAllByText('Workout sent to HumanV1').length).toBeGreaterThan(0);
+  });
+
+  it('offers an editable copy for an Android-origin workout without rewriting its source record', async () => {
+    mocks.list.mockResolvedValue({ offline: false, verifiedAt: '2026-01-01T00:00:00Z', items: [{
+      globalId: 'android-workout', workout: { ...workout, workoutId: 'android-workout', title: 'Lower Body Day' }, draft: null,
+      updatedAt: '', state: 'DRAFT', latestVersion: null, versions: [], acknowledgement: null, acknowledgements: [], syncRecord: null,
+    }] });
+    render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy to Studio to edit' }));
+    await waitFor(() => expect(mocks.saveWorkoutDraft).toHaveBeenCalledTimes(1));
+    const [, copied] = mocks.saveWorkoutDraft.mock.calls[0] as unknown as [string, typeof workout];
+    expect(copied.title).toBe('Lower Body Day (Copy)');
+    expect(copied.workoutId).not.toBe('android-workout');
   });
 });

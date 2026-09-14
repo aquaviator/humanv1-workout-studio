@@ -130,8 +130,29 @@ export class CrossAppRepository {
     const stored = await get<CrossAppConflict>(key);
     if (stored?.resolvedRevision) return;
     const selected = strategy === "KEEP_STUDIO" ? conflict.studio : strategy === "KEEP_APP" ? conflict.app : safeThreeWayMerge(conflict.base, conflict.studio, conflict.app);
-    const revision = Math.max(asNumber(conflict.studio.revision), asNumber(conflict.app.revision)) + 1;
-    await this.write(conflict.owner, conflict.collectionName, conflict.id, { ...selected, globalId: conflict.id, humanUserId: conflict.owner, revision, updatedAt: Date.now() });
+    let revision = Math.max(asNumber(conflict.studio.revision), asNumber(conflict.app.revision)) + 1;
+    if (this.write === defaultWrite) {
+      const ref = doc(db, "users", conflict.owner, conflict.collectionName, conflict.id);
+      await runTransaction(db, async transaction => {
+        const current = await transaction.get(ref);
+        if (!current.exists()) throw new Error("CONFLICT_TARGET_MISSING");
+        const remote = current.data();
+        if (remote.humanUserId !== conflict.owner || remote.globalId !== conflict.id) throw new Error("OWNERSHIP_CONFLICT");
+        const observedRevision = asNumber(conflict.app.revision);
+        if (asNumber(remote.revision) !== observedRevision) throw new Error("STALE_CONFLICT_REFRESH_REQUIRED");
+        revision = observedRevision + 1;
+        transaction.set(ref, {
+          ...selected,
+          globalId: conflict.id,
+          humanUserId: conflict.owner,
+          createdAt: remote.createdAt,
+          revision,
+          updatedAt: Date.now(),
+        });
+      });
+    } else {
+      await this.write(conflict.owner, conflict.collectionName, conflict.id, { ...selected, globalId: conflict.id, humanUserId: conflict.owner, revision, updatedAt: Date.now() });
+    }
     await set(key, { ...conflict, resolvedRevision: revision }); await del(pendingKey(conflict.owner, conflict.collectionName, conflict.id));
   }
 

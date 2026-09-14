@@ -42,6 +42,7 @@ function safeReason(code?: SyncFailureCode | string | null) {
 export function presentWorkoutDelivery(args: {
   workout: Workout; syncRecord?: SyncRecord | null; acknowledgements?: DeliveryAcknowledgement[];
   online?: boolean; latestRevision?: number; transientPhase?: 'VALIDATING' | 'PREPARING' | null;
+  acknowledgementVerificationFailed?: boolean;
 }): DeliveryPresentation | null {
   const { workout, syncRecord, online = navigator.onLine, latestRevision, transientPhase } = args;
   if (transientPhase) return { phase: transientPhase, title: transientPhase === 'VALIDATING' ? 'Checking your workout' : 'Preparing version', detail: 'Please keep this page open for this step.', destinations: compatibleDestinations(workout), canRetry: false, isConflict: false };
@@ -67,5 +68,6 @@ export function presentWorkoutDelivery(args: {
     const partial = successful.length > 0 && destinations.some(d => d.state === 'NOT_YET_RECEIVED');
     return { ...common, phase: partial ? 'PARTIALLY_DELIVERED' : 'AVAILABLE_IN_APPS', title: partial ? 'Partially delivered' : 'Available in your apps', detail: successful.map(d => `${d.state === 'APPLIED' ? 'Applied by' : 'Received by'} ${d.label}`).join(' · '), canRetry: false, isConflict: acknowledged.some(d => d.state === 'FAILED') };
   }
+  if (args.acknowledgementVerificationFailed) return { ...common, phase: 'RETRY_REQUIRED', title: 'Delivery verification unavailable', detail: 'HumanV1 has the workout, but receipt status could not be verified. Reconnect or refresh to check again.', reason: 'NETWORK_RETRYABLE', canRetry: false, isConflict: false };
   return { ...common, phase: 'SENT_TO_HUMANV1', title: 'Workout sent to HumanV1', detail: destinations.length ? 'Your workout is safely stored and waiting for your compatible apps.' : 'Sent to HumanV1 — it will be available when you open a compatible app.', canRetry: false, isConflict: false };
 }
