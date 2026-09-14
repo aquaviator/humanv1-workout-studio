@@ -2,12 +2,15 @@ import React, { useState, useEffect } from "react";
 import { HumanIdentity } from "../../domain/identity";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { draftRepository } from "../../repositories/DraftRepository";
-import { AlertCircle, RefreshCw, UploadCloud, DownloadCloud, Trash2 } from "lucide-react";
+import { AlertCircle, RefreshCw, UploadCloud, DownloadCloud } from "lucide-react";
 import { formatUserDate } from "../../domain/presentation";
+import { v4 as uuidv4 } from "uuid";
+import { Plan, Protocol, Workout } from "../../domain/types";
 
 export default function ConflictCentre({ identity }: { identity: HumanIdentity }) {
   const [conflicts, setConflicts] = useState<SyncRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [reviewing, setReviewing] = useState<string | null>(null);
 
   const loadConflicts = async () => {
     setIsLoading(true);
@@ -15,7 +18,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
     const pRecords = await syncManager.listSyncRecords(identity.humanUserId, 'plan');
     const ptRecords = await syncManager.listSyncRecords(identity.humanUserId, 'protocol');
     
-    const allConflicts = [...wRecords, ...pRecords, ...ptRecords].filter(r => r.status === 'CONFLICT');
+    const allConflicts = [...wRecords, ...pRecords, ...ptRecords].filter(r => r.status === 'CONFLICT' || r.status === 'NEEDS_USER_REVIEW');
     setConflicts(allConflicts);
     setIsLoading(false);
   };
@@ -25,26 +28,28 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
   }, [identity.humanUserId]);
 
   const handleDiscardLocal = async (record: SyncRecord) => {
-    if (!window.confirm("Are you sure you want to discard local changes and use the remote version? This cannot be undone.")) {
+    if (!window.confirm("Keep the newer cloud version? Your preserved Studio changes will remain in the synchronization audit.")) {
       return;
     }
     try {
       await syncManager.resolveWithRemote(identity.humanUserId, record);
       await loadConflicts();
     } catch (e) {
-      alert("Failed to discard local changes: " + (e as Error).message);
+      alert("Studio could not keep the newer cloud version safely: " + (e as Error).message);
     }
   };
 
-  const handleForceOverwrite = async (record: SyncRecord) => {
-    if (!window.confirm("Are you sure you want to force overwrite the remote version? This will overwrite changes made on another device.")) {
-      return;
-    }
+  const handleCreateCopy = async (record: SyncRecord) => {
     try {
-      await syncManager.resolveWithLocal(identity.humanUserId, record);
+      const payload = structuredClone(record.envelope.payload);
+      const newId = uuidv4();
+      if (record.type === 'workout') await draftRepository.saveWorkoutDraft(identity.humanUserId, { ...(payload as Workout), workoutId: newId, title: `${payload.title} (Preserved copy)` });
+      if (record.type === 'plan') await draftRepository.savePlanDraft(identity.humanUserId, { ...(payload as Plan), planId: newId, title: `${payload.title} (Preserved copy)` });
+      if (record.type === 'protocol') await draftRepository.saveProtocolDraft(identity.humanUserId, { ...(payload as Protocol), protocolId: newId, title: `${payload.title} (Preserved copy)` });
+      await syncManager.resolveWithRemote(identity.humanUserId, record);
       await loadConflicts();
     } catch (e) {
-      alert("Failed to force overwrite: " + (e as Error).message);
+      alert("Studio could not create the preserved copy safely: " + (e as Error).message);
     }
   };
 
@@ -52,8 +57,8 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Conflict Centre</h1>
-          <p className="text-hv-text-muted mt-1 text-sm">Resolve synchronization conflicts between local and remote drafts.</p>
+          <h1 className="text-2xl font-bold">Issues needing attention</h1>
+          <p className="text-hv-text-muted mt-1 text-sm">Review changes that Studio will not resolve automatically.</p>
         </div>
         <button onClick={loadConflicts} className="p-2 border border-hv-border rounded hover:bg-hv-surface-2 transition-colors" aria-label="Refresh">
           <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -71,7 +76,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2 text-hv-error">
                   <AlertCircle className="w-5 h-5" />
-                  <span className="font-semibold">{conflict.lastErrorCode || "Sync Conflict"}</span>
+                  <span className="font-semibold">Newer edits need attention</span>
                 </div>
                 <div className="text-hv-text">
                   <span className="capitalize font-medium">{conflict.type}</span>: {conflict.envelope.payload.title || "Untitled"}
@@ -81,6 +86,8 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
                   <span>Local Rev: {conflict.envelope.revision}</span>
                   <span>Updated: {formatUserDate(conflict.envelope.updatedAt, true)}</span>
                 </div>
+                <p id={`issue-${idx}`} className="text-sm text-hv-text-muted">This {conflict.type} changed elsewhere after this browser saved its copy. Your changes have been preserved, but Studio will not overwrite the newer version.</p>
+                {reviewing === `${conflict.type}-${conflict.envelope.globalId}` && <details open className="text-xs text-hv-text-muted"><summary>Technical details</summary><div>Local revision {conflict.envelope.revision}; reason {conflict.lastErrorCode ?? 'not recorded'}.</div></details>}
               </div>
               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                 <button 
@@ -88,14 +95,22 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
                   className="px-4 py-2 text-sm bg-hv-surface-2 border border-hv-border hover:bg-hv-border rounded flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
                 >
                   <DownloadCloud className="w-4 h-4" />
-                  Keep App
+                  Keep newer cloud version
+                </button>
+                <button
+                  onClick={() => setReviewing(`${conflict.type}-${conflict.envelope.globalId}`)}
+                  aria-describedby={`issue-${idx}`}
+                  className="px-4 py-2 text-sm bg-hv-surface-2 border border-hv-border rounded flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
+                >
+                  Review differences
                 </button>
                 <button 
-                  onClick={() => handleForceOverwrite(conflict)}
+                  onClick={() => handleCreateCopy(conflict)}
+                  aria-describedby={`issue-${idx}`}
                   className="px-4 py-2 text-sm bg-hv-primary hover:bg-hv-primary-hover text-white rounded flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
                 >
                   <UploadCloud className="w-4 h-4" />
-                  Keep Studio
+                  Create a copy from my preserved changes
                 </button>
               </div>
             </div>

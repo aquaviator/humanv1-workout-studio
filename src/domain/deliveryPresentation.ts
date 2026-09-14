@@ -13,6 +13,8 @@ export interface DeliveryPresentation {
   phase: DeliveryPhase; title: string; detail: string; destinations: DestinationDelivery[];
   versionId?: string; revision?: number; checksum?: string; timestamp?: string; reason?: string;
   canRetry: boolean; isConflict: boolean;
+  primaryStatus: 'SAVED_IN_STUDIO' | 'SENDING' | 'ON_PHONE' | 'NEEDS_ATTENTION';
+  actionLabel?: 'Send to HumanV1' | 'Review workout' | 'Publish current version';
 }
 
 const appLabels: Record<string, string> = {
@@ -31,10 +33,10 @@ export function compatibleDestinations(workout: Workout): DestinationDelivery[] 
 function safeReason(code?: SyncFailureCode | string | null) {
   const messages: Record<string, string> = {
     NETWORK_OFFLINE: 'No connection. It will retry automatically when you reconnect.', NETWORK_RETRYABLE: 'HumanV1 could not be reached yet.',
-    PERMISSION_DENIED: 'Your account is not permitted to send this workout.', OWNERSHIP_CONFLICT: 'The workout owner could not be verified.',
-    REVISION_CONFLICT: 'A newer cloud revision needs your attention.', REVISION_COLLISION: 'This revision differs from the cloud copy.',
-    REMOTE_CHANGED_WHILE_LOCAL_PENDING: 'The cloud workout changed while this version was waiting.', CORRUPT_PAYLOAD: 'The saved workout could not be read safely.',
-    UPLOAD_FAILED: 'HumanV1 could not accept this version.',
+    PERMISSION_DENIED: 'Studio could not safely update this item. Review it before taking another action.', OWNERSHIP_CONFLICT: 'The workout owner could not be verified.',
+    REVISION_CONFLICT: 'Newer edits need attention.', REVISION_COLLISION: 'This workout changed elsewhere. Your Studio changes are preserved.',
+    REMOTE_CHANGED_WHILE_LOCAL_PENDING: 'This item changed elsewhere. Your Studio changes are preserved.', CORRUPT_PAYLOAD: 'The saved workout could not be read safely.',
+    UPLOAD_FAILED: 'HumanV1 could not safely accept this version.',
   };
   return code ? messages[code] ?? 'Delivery needs attention.' : undefined;
 }
@@ -43,9 +45,11 @@ export function presentWorkoutDelivery(args: {
   workout: Workout; syncRecord?: SyncRecord | null; acknowledgements?: DeliveryAcknowledgement[];
   online?: boolean; latestRevision?: number; transientPhase?: 'VALIDATING' | 'PREPARING' | null;
   acknowledgementVerificationFailed?: boolean;
+  publishedVersionAvailable?: boolean;
+  editNeedsAttention?: boolean;
 }): DeliveryPresentation | null {
   const { workout, syncRecord, online = navigator.onLine, latestRevision, transientPhase } = args;
-  if (transientPhase) return { phase: transientPhase, title: transientPhase === 'VALIDATING' ? 'Checking your workout' : 'Preparing version', detail: 'Please keep this page open for this step.', destinations: compatibleDestinations(workout), canRetry: false, isConflict: false };
+  if (transientPhase) return { phase: transientPhase, primaryStatus: 'SENDING', title: 'Sending to HumanV1', detail: 'Sending to your phone…', destinations: compatibleDestinations(workout), canRetry: false, isConflict: false };
   if (!syncRecord || syncRecord.syncType !== 'publication') return null;
   const envelope = syncRecord.envelope as PublishedEnvelope<Workout>;
   const destinations = compatibleDestinations(workout);
@@ -57,17 +61,19 @@ export function presentWorkoutDelivery(args: {
     destination.reason = ack.reasonCode ?? undefined;
   }
   const common = { destinations, versionId: envelope.versionId, revision: envelope.revision, checksum: envelope.contentChecksum, timestamp: envelope.publishedAt };
-  if (latestRevision && latestRevision > envelope.revision) return { ...common, phase: 'SUPERSEDED', title: 'Superseded by a newer version', detail: 'This version’s delivery history is retained.', canRetry: false, isConflict: false };
-  if (syncRecord.status === 'QUEUED') return { ...common, phase: online ? 'QUEUED' : 'QUEUED_OFFLINE', title: online ? 'Saved and queued' : 'Queued — will send when connected', detail: online ? 'Safely stored on this device and waiting for normal synchronization. You may close the browser.' : 'Safely stored on this device. You may close the browser.', canRetry: false, isConflict: false };
-  if (syncRecord.status === 'SENDING') return { ...common, phase: 'SENDING', title: 'Sending to HumanV1…', detail: 'Upload is in progress. Keep this page open until it is queued or sent.', canRetry: false, isConflict: false };
-  if (syncRecord.status === 'CONFLICT') return { ...common, phase: 'CONFLICT', title: 'Delivery conflict', detail: safeReason(syncRecord.lastErrorCode)!, reason: syncRecord.lastErrorCode, canRetry: false, isConflict: true };
-  if (syncRecord.status === 'FAILED') return { ...common, phase: 'RETRY_REQUIRED', title: 'Retry required', detail: safeReason(syncRecord.lastErrorCode)!, reason: syncRecord.lastErrorCode, canRetry: syncRecord.lastErrorCode !== 'PERMISSION_DENIED', isConflict: false };
   const acknowledged = destinations.filter(d => d.state !== 'NOT_YET_RECEIVED');
-  if (acknowledged.length) {
-    const successful = acknowledged.filter(d => !['FAILED', 'UNSUPPORTED_VERSION'].includes(d.state));
-    const partial = successful.length > 0 && destinations.some(d => d.state === 'NOT_YET_RECEIVED');
-    return { ...common, phase: partial ? 'PARTIALLY_DELIVERED' : 'AVAILABLE_IN_APPS', title: partial ? 'Partially delivered' : 'Available in your apps', detail: successful.map(d => `${d.state === 'APPLIED' ? 'Applied by' : 'Received by'} ${d.label}`).join(' · '), canRetry: false, isConflict: acknowledged.some(d => d.state === 'FAILED') };
+  if (acknowledged.some(d => d.state === 'APPLIED')) {
+    return { ...common, phase: 'AVAILABLE_IN_APPS', primaryStatus: 'ON_PHONE', title: 'On your phone', detail: args.editNeedsAttention ? 'Delivered. Newer edits need attention.' : 'Delivered.', canRetry: false, isConflict: Boolean(args.editNeedsAttention) };
   }
-  if (args.acknowledgementVerificationFailed) return { ...common, phase: 'RETRY_REQUIRED', title: 'Delivery verification unavailable', detail: 'HumanV1 has the workout, but receipt status could not be verified. Reconnect or refresh to check again.', reason: 'NETWORK_RETRYABLE', canRetry: false, isConflict: false };
-  return { ...common, phase: 'SENT_TO_HUMANV1', title: 'Workout sent to HumanV1', detail: destinations.length ? 'Your workout is safely stored and waiting for your compatible apps.' : 'Sent to HumanV1 — it will be available when you open a compatible app.', canRetry: false, isConflict: false };
+  if (args.publishedVersionAvailable === false) return { ...common, phase: 'NEEDS_ATTENTION', primaryStatus: 'NEEDS_ATTENTION', title: 'Needs attention', detail: 'This older delivery cannot be completed because its published version is unavailable.', canRetry: false, isConflict: false, actionLabel: 'Review workout' };
+  if (latestRevision && latestRevision > envelope.revision) return { ...common, phase: 'SUPERSEDED', primaryStatus: 'SAVED_IN_STUDIO', title: 'Saved in Studio', detail: 'A newer version is saved. This delivery history remains available in Technical details.', canRetry: false, isConflict: false };
+  if (syncRecord.status === 'QUEUED') return { ...common, phase: online ? 'QUEUED' : 'QUEUED_OFFLINE', primaryStatus: 'SENDING', title: 'Sending to HumanV1', detail: online ? 'Sending to your phone…' : 'Will send automatically when you are online.', canRetry: false, isConflict: false };
+  if (syncRecord.status === 'SENDING') return { ...common, phase: 'SENDING', primaryStatus: 'SENDING', title: 'Sending to HumanV1', detail: 'Sending to your phone…', canRetry: false, isConflict: false };
+  if (syncRecord.status === 'CONFLICT' || syncRecord.status === 'NEEDS_USER_REVIEW') return { ...common, phase: 'CONFLICT', primaryStatus: 'NEEDS_ATTENTION', title: 'Needs attention', detail: safeReason(syncRecord.lastErrorCode)!, reason: syncRecord.lastErrorCode, canRetry: false, isConflict: true };
+  if (syncRecord.status === 'FAILED') {
+    const automatic = syncRecord.lastErrorCode === 'NETWORK_OFFLINE' || syncRecord.lastErrorCode === 'NETWORK_RETRYABLE';
+    return { ...common, phase: 'RETRY_REQUIRED', primaryStatus: automatic ? 'SENDING' : 'NEEDS_ATTENTION', title: automatic ? 'Sending to HumanV1' : 'Needs attention', detail: safeReason(syncRecord.lastErrorCode)!, reason: syncRecord.lastErrorCode, canRetry: false, isConflict: false };
+  }
+  if (args.acknowledgementVerificationFailed) return { ...common, phase: 'RETRY_REQUIRED', primaryStatus: 'NEEDS_ATTENTION', title: 'Delivery verification unavailable', detail: 'HumanV1 has the workout, but its phone status could not be verified. Reconnect or refresh to check again.', reason: 'NETWORK_RETRYABLE', canRetry: false, isConflict: false };
+  return { ...common, phase: 'SENT_TO_HUMANV1', primaryStatus: 'SENDING', title: 'Sending to HumanV1', detail: 'Waiting for your phone.', canRetry: false, isConflict: false };
 }

@@ -7,6 +7,7 @@ vi.mock('idb-keyval', () => ({
   get: vi.fn((key: string) => Promise.resolve(state.values.get(key))),
   set: vi.fn((key: string, value: unknown) => { state.values.set(key, structuredClone(value)); return Promise.resolve(); }),
   keys: vi.fn(() => Promise.resolve([...state.values.keys()])), setMany: vi.fn(),
+  del: vi.fn((key: string) => { state.values.delete(key); return Promise.resolve(); }),
 }));
 vi.mock('../../config/firebase', () => ({ db: {} }));
 vi.mock('firebase/firestore', () => ({
@@ -55,9 +56,28 @@ describe('SyncManager publication replay', () => {
     await manager.queueUpload(envelope, 'workout', 'publication');
     await manager.syncPending();
     const record = (await manager.listPublicationSyncRecords('human-1', 'workout'))[0];
-    expect(record.status).toBe('CONFLICT');
+    expect(record.status).toBe('NEEDS_USER_REVIEW');
     expect(record.lastErrorCode).toBe('PERMISSION_DENIED');
     expect(record.envelope).toEqual(envelope);
+    expect(record.auditHistory?.at(-1)?.reason).toBe('PERMISSION_DENIED');
+    const attempts = state.transactionCount;
+    await manager.syncPending();
+    expect(state.transactionCount).toBe(attempts);
+  });
+
+  it('stops an unknown deterministic failure after three attempts without losing its payload', async () => {
+    state.transactionFailure = new Error('deterministic invalid content');
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    const manager = new SyncManager();
+    await manager.queueUpload(envelope, 'workout', 'publication');
+    await manager.syncPending(); await manager.syncPending();
+    const record = (await manager.listPublicationSyncRecords('human-1', 'workout'))[0];
+    expect(record.status).toBe('NEEDS_USER_REVIEW');
+    expect(record.attemptCount).toBe(3);
+    expect(record.envelope).toEqual(envelope);
+    expect(record.auditHistory).toHaveLength(3);
+    await manager.syncPending();
+    expect(state.transactionCount).toBe(3);
   });
 
   it('coalesces concurrent replay requests so one immutable version is written once', async () => {

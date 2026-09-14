@@ -29,7 +29,8 @@ async function openSignedIn(context: BrowserContext) {
 
 async function makeValid(page: Page) {
   await page.getByLabel('Workout Title').fill('Browser delivery acceptance');
-  await page.getByRole('button', { name: 'Add Rest' }).click();
+  await page.getByRole('button', { name: 'Add Exercise' }).click();
+  await page.getByRole('button', { name: /Push Up/ }).click();
   await expect(page.getByRole('button', { name: 'Send to my apps' })).toBeEnabled();
 }
 
@@ -56,7 +57,7 @@ async function seedPlanDependencyDraft() {
     await db.doc(`users/${owner}/workoutDrafts/workout_plan_dependency`).set({
       schemaVersion: 1, globalId: 'workout_plan_dependency', humanUserId: owner, revision: 1, status: 'DRAFT',
       createdAt: now, updatedAt: now, deletedAt: null, originClientId: 'browser_fixture',
-      payload: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_plan_dependency', title: 'Browser plan dependency', discipline: 'STRENGTH', catalogueReleaseId: 'browser-catalogue', tags: ['synthetic'], blocks: [{ blockId: 'rest_plan_dependency', type: 'REST', durationSeconds: 60, recoveryType: 'PASSIVE', instructions: 'Synthetic acceptance rest.' }] },
+      payload: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_plan_dependency', title: 'Browser plan dependency', discipline: 'STRENGTH', catalogueReleaseId: 'browser-catalogue', tags: ['synthetic'], blocks: [{ blockId: 'exercise_plan_dependency', type: 'EXERCISE', exerciseId: 'browser_push_up', exerciseNameSnapshot: 'Push Up', efforts: [{ effortId: 'effort_plan_dependency', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'rx_plan_dependency', metricKey: 'repetitions', targetValue: 10, canonicalUnit: 'repetitions' }] }] }] },
     });
   } finally { await deleteApp(app); }
 }
@@ -119,8 +120,9 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.getByRole('button', { name: 'Continue editing' }).focus();
     await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
     await expect(page.getByText('Available in your apps')).toHaveCount(0);
+    await expect.poll(async () => (await latestPublication())?.revision).toBe(1);
     const first = await latestPublication();
     expect(first.revision).toBe(1);
 
@@ -138,7 +140,8 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByText('Saved', { exact: true })).toBeVisible();
     await send.click();
     await page.getByRole('button', { name: 'Send to my apps' }).last().click();
-    await expect(page.getByRole('heading', { name: 'Queued — will send when connected' })).toBeVisible();
+    await expect(page.getByText('Queued — will send when connected', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
     expect((await latestPublication()).revision).toBe(1);
     await context.close();
 
@@ -147,7 +150,7 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.goto('/workouts');
     await expect(page.getByText('Offline — showing the last verified cloud status.')).toBeVisible();
     await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Queued — will send when connected' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
     expect((await latestPublication()).revision).toBe(1);
     await context.setOffline(false);
     await expect(page.getByText('Browser delivery acceptance revision 2')).toBeVisible();
@@ -165,7 +168,7 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByText('Available in your apps')).toHaveCount(0);
     await writeAck({ case: 'exact' });
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Available in your apps' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'On your phone' })).toBeVisible();
     expect(revision2.revision).toBe(2);
   });
 
@@ -186,10 +189,10 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     });
     await page.getByRole('button', { name: 'Send to my apps' }).click();
     await page.getByRole('button', { name: 'Send to my apps' }).last().click();
-    await expect(page.getByRole('heading', { name: 'Sending to HumanV1…' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
     await context.setOffline(true);
     await page.evaluate(() => (window as typeof window & { __HV1_TEST_RELEASE_SEND__?: () => void }).__HV1_TEST_RELEASE_SEND__?.());
-    await expect(page.getByRole('heading', { name: 'Retry required' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible({ timeout: 20_000 });
     expect((await latestPublication()).revision).toBe(2);
     await context.close();
 
@@ -200,7 +203,7 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await context.setOffline(false);
     await expect.poll(async () => (await latestPublication())?.revision).toBe(3);
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByText('Browser delivery acceptance interrupted send')).toBeVisible();
@@ -211,7 +214,7 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 390, height: 844 } });
     ({ page } = await openSignedIn(context));
     await page.goto('/workouts');
-    await expect(page.getByRole('heading', { name: 'Workout sent to HumanV1' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sending to HumanV1' })).toBeVisible();
     await expect(page.getByText('Available in your apps')).toHaveCount(0);
   });
 

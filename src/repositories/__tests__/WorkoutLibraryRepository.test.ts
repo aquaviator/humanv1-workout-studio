@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
 vi.mock('idb-keyval', () => ({
   get: vi.fn((key: string) => Promise.resolve(state.cache.get(key))),
   set: vi.fn((key: string, value: unknown) => { state.cache.set(key, value); return Promise.resolve(); }),
+  keys: vi.fn(() => Promise.resolve([...state.cache.keys()])),
 }));
 vi.mock('../../config/firebase', () => ({ db: {} }));
 vi.mock('../DraftRepository', () => ({ draftRepository: { listWorkoutEnvelopes: vi.fn(() => Promise.resolve(state.drafts)) } }));
@@ -75,5 +76,14 @@ describe('WorkoutLibraryRepository', () => {
     const repository = new WorkoutLibraryRepository(async () => [publication()], async () => [ack()], () => true);
     const item = (await repository.list('human-1')).items[0];
     expect(item.syncRecord).toMatchObject({ syncType: 'publication', status: 'SYNCED' });
+  });
+
+  it('recognizes a locally preserved offline publication even when it is newer than the cloud cache', async () => {
+    const queued = publication({ revision: 3, versionId: 'workout-1_r3_local' });
+    state.cache.set('published_human-1_workout_workout-1_r3_local', queued);
+    state.publicationSyncs = [{ syncType: 'publication', envelope: queued, status: 'QUEUED', type: 'workout' }];
+    const repository = new WorkoutLibraryRepository(async () => [publication()], async () => [], () => true);
+    const item = (await repository.list('human-1')).items[0];
+    expect(item.publicationSourceAvailable).toBe(true);
   });
 });

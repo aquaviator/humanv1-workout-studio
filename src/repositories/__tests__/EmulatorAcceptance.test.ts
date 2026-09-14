@@ -204,7 +204,7 @@ describe('Emulator Acceptance', () => {
     await syncManager.syncPending();
     await expect(getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub.versionId))).rejects.toMatchObject({ code: 'permission-denied' });
     const record = (await syncManager.listPublicationSyncRecords('human_1', 'workout')).find(item => item.envelope.globalId === 'workout_hack');
-    expect(record?.status).toBe('CONFLICT');
+    expect(record?.status).toBe('NEEDS_USER_REVIEW');
     expect(record?.lastErrorCode).toBe('PERMISSION_DENIED');
   });
 

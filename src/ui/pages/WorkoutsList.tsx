@@ -169,8 +169,17 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
           const workout = item.workout;
           const env = item.draft;
           const reconstructedSync = item.syncRecord ?? (item.latestVersion ? { syncType: 'publication' as const, envelope: item.latestVersion, status: 'SYNCED' as const, type: 'workout' as const, acknowledgedRevision: item.latestVersion.revision } : null);
-          const delivery = presentWorkoutDelivery({ workout, syncRecord: reconstructedSync, acknowledgements: item.acknowledgements, online: !offline, latestRevision: item.latestVersion?.revision });
-          const statusText = delivery?.title ?? (item.state === 'DRAFT' ? 'Draft' : 'Delivery status unavailable');
+          const publishedVersionAvailable = item.publicationSourceAvailable ?? (!reconstructedSync || reconstructedSync.syncType !== 'publication' ||
+            item.versions.some(version => version.versionId === ('versionId' in reconstructedSync.envelope ? reconstructedSync.envelope.versionId : undefined)));
+          const delivery = presentWorkoutDelivery({
+            workout, syncRecord: reconstructedSync, acknowledgements: item.acknowledgements, online: !offline,
+            latestRevision: item.latestVersion?.revision, publishedVersionAvailable,
+            editNeedsAttention: item.state === 'CONFLICT',
+          });
+          const statusText = delivery?.title ?? 'Saved in Studio';
+          const updatedAt = dateFromUnknown(item.updatedAt);
+          const isPhoneOrigin = !env && !item.latestVersion;
+          const hasExecutableContent = workout.blocks.some(block => block.type !== 'NOTE');
           return (
             <div key={workout.workoutId} className="bg-hv-surface-1 border border-hv-border p-4 rounded-lg flex flex-col">
               <div className="flex justify-between items-start mb-2">
@@ -201,22 +210,22 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                   )}
                 </div>
               </div>
-              {item.latestVersion && <div className="mb-2 text-xs text-hv-text-muted">Latest published revision {item.latestVersion.revision} · {item.versions.length} immutable version{item.versions.length === 1 ? "" : "s"}</div>}
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xs bg-hv-surface-2 px-2 py-1 rounded text-hv-text-muted uppercase tracking-wider font-semibold">
                   {workout.discipline}
                 </span>
-                <span className="text-xs text-hv-text-muted flex items-center gap-1">
+                {(workout.estimatedDurationSeconds ?? 0) > 0 && <span className="text-xs text-hv-text-muted flex items-center gap-1">
                   <Clock className="w-3 h-3" />
-                  {Math.round((workout.estimatedDurationSeconds || 0) / 60)} min
-                </span>
+                  {Math.round(workout.estimatedDurationSeconds! / 60)} min
+                </span>}
+                {isPhoneOrigin && <span className="text-xs text-hv-text-muted">From your phone</span>}
               </div>
               <p className="text-sm text-hv-text-muted line-clamp-2 mt-auto mb-3">
                 {workout.description || "No description provided."}
               </p>
               <div className="flex justify-between items-center mt-2 border-t border-hv-border pt-2 text-xs">
                 <span className="text-hv-text-muted">
-                  Updated {formatUserDate(item.updatedAt)}
+                  {updatedAt ? `Updated ${formatUserDate(updatedAt)}` : ''}
                 </span>
                 <span className={cn(
                   "font-medium",
@@ -228,11 +237,13 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
                 </span>
               </div>
               <ReconstructionDiagnostics diagnostics={item.diagnostics} />
-              {!env && !item.latestVersion && (
-                <button type="button" onClick={() => handleDuplicate(workout)} className="mt-3 rounded border border-hv-primary px-3 py-2 text-sm font-medium text-hv-primary hover:bg-hv-surface-2">
+              {isPhoneOrigin && <div className="mt-3">
+                {!hasExecutableContent && <p className="mb-2 text-sm text-hv-warning">Incomplete workout — add exercises after copying it to Studio.</p>}
+                <button type="button" onClick={() => handleDuplicate(workout)} className="rounded border border-hv-primary px-3 py-2 text-sm font-medium text-hv-primary hover:bg-hv-surface-2">
                   Copy to Studio to edit
                 </button>
-              )}
+                <p className="mt-1 text-xs text-hv-text-muted">Your original phone workout will not be changed.</p>
+              </div>}
               <div className="mt-3"><WorkoutDeliveryStatus delivery={delivery} /></div>
             </div>
           );

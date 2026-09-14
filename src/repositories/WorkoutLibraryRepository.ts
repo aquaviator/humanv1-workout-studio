@@ -1,5 +1,5 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { get, set } from 'idb-keyval';
+import { get, keys, set } from 'idb-keyval';
 import { db } from '../config/firebase';
 import { PublishedEnvelope } from '../domain/publication';
 import { Workout } from '../domain/types';
@@ -23,6 +23,7 @@ export interface WorkoutLibraryItem {
   state: WorkoutLibraryState;
   updatedAt: string;
   diagnostics: ReconstructionDiagnostic[];
+  publicationSourceAvailable: boolean;
 }
 
 export interface WorkoutLibraryResult {
@@ -63,11 +64,22 @@ export class WorkoutLibraryRepository {
 
   private cacheKey(humanUserId: string) { return `verified_workout_library_${humanUserId}`; }
 
+  private async listLocalPublications(humanUserId: string): Promise<PublishedEnvelope<Workout>[]> {
+    const prefix = `published_${humanUserId}_workout_`;
+    const result: PublishedEnvelope<Workout>[] = [];
+    for (const key of (await keys()).filter((value): value is string => typeof value === 'string' && value.startsWith(prefix))) {
+      const publication = await get<PublishedEnvelope<Workout>>(key);
+      if (publication) result.push(publication);
+    }
+    return result;
+  }
+
   async list(humanUserId: string): Promise<WorkoutLibraryResult> {
-    const [drafts, syncRecords, publicationSyncRecords] = await Promise.all([
+    const [drafts, syncRecords, publicationSyncRecords, localPublications] = await Promise.all([
       draftRepository.listWorkoutEnvelopes(humanUserId),
       syncManager.listSyncRecords(humanUserId, 'workout'),
       syncManager.listPublicationSyncRecords(humanUserId, 'workout'),
+      this.listLocalPublications(humanUserId),
     ]);
     let cache = await get<VerifiedCache>(this.cacheKey(humanUserId));
     let offline = !this.online();
@@ -112,7 +124,7 @@ export class WorkoutLibraryRepository {
       const sync = syncByWorkout.get(globalId);
       const publicationSync = publicationSyncByWorkout.get(globalId);
       let state: WorkoutLibraryState = latestVersion ? 'SENT' : 'DRAFT';
-      if (sync?.status === 'CONFLICT') state = 'CONFLICT';
+      if (sync?.status === 'CONFLICT' || sync?.status === 'NEEDS_USER_REVIEW') state = 'CONFLICT';
       else if (sync?.status === 'FAILED') state = 'RETRY_REQUIRED';
       else if (sync?.status === 'QUEUED' || sync?.status === 'SENDING') state = 'QUEUED';
       else if (acknowledgement?.state === 'APPLIED') state = 'DOWNLOADED';
@@ -132,6 +144,8 @@ export class WorkoutLibraryRepository {
         state,
         updatedAt,
         diagnostics: [...(workout.reconstructionDiagnostics ?? []), ...timestampDiagnostic(updatedAt)],
+        publicationSourceAvailable: !publicationSync || localPublications.some(version => version.versionId === (publicationSync.envelope as PublishedEnvelope<Workout>).versionId) ||
+          versions.some(version => version.versionId === (publicationSync.envelope as PublishedEnvelope<Workout>).versionId),
       };
     }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 

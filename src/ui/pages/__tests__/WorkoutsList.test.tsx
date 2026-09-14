@@ -28,8 +28,8 @@ describe('WorkoutsList cloud hydration', () => {
     }] });
     render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
     expect(await screen.findByText('Studio Production Acceptance')).toBeInTheDocument();
-    expect(screen.getByText('Applied by Human Strength')).toBeInTheDocument();
-    expect(screen.getByText('Latest published revision 2 · 2 immutable versions')).toBeInTheDocument();
+    expect(screen.getAllByText('On your phone').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Latest published revision 2 · 2 immutable versions')).not.toBeInTheDocument();
     expect(screen.queryByText('No workouts found.')).not.toBeInTheDocument();
   });
 
@@ -40,7 +40,7 @@ describe('WorkoutsList cloud hydration', () => {
     }] });
     render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('last verified cloud status'));
-    expect(screen.getAllByText('Workout sent to HumanV1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Sending to HumanV1').length).toBeGreaterThan(0);
   });
 
   it('offers an editable copy for an Android-origin workout without rewriting its source record', async () => {
@@ -49,6 +49,10 @@ describe('WorkoutsList cloud hydration', () => {
       updatedAt: '', state: 'DRAFT', latestVersion: null, versions: [], acknowledgement: null, acknowledgements: [], syncRecord: null,
     }] });
     render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
+    expect(await screen.findByText('From your phone')).toBeInTheDocument();
+    expect(screen.getByText('Incomplete workout — add exercises after copying it to Studio.')).toBeInTheDocument();
+    expect(screen.queryByText('0 min')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Timestamp unavailable/)).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Copy to Studio to edit' }));
     await waitFor(() => expect(mocks.saveWorkoutDraft).toHaveBeenCalledTimes(1));
     const [, copied] = mocks.saveWorkoutDraft.mock.calls[0] as unknown as [string, typeof workout];

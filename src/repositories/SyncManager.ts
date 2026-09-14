@@ -5,7 +5,7 @@ import { PublishableContent } from '../domain/publication';
 import { db } from '../config/firebase';
 import { doc, runTransaction, collection, query, getDocs, getDoc } from 'firebase/firestore';
 
-export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED';
+export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED' | 'NEEDS_USER_REVIEW';
 export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
 
 export interface SyncRecord {
@@ -15,6 +15,10 @@ export interface SyncRecord {
   type: 'workout' | 'plan' | 'protocol';
   lastErrorCode?: SyncFailureCode;
   acknowledgedRevision?: number;
+  attemptCount?: number;
+  lastAttemptAt?: string;
+  lastCompletedAt?: string;
+  auditHistory?: Array<{ at: string; status: SyncStatus; reason?: SyncFailureCode }>;
 }
 
 type Subscriber = () => void;
@@ -129,8 +133,12 @@ export class SyncManager {
 
         if (syncRecord?.status === 'QUEUED' || syncRecord?.status === 'FAILED' || syncRecord?.status === 'SENDING') {
           if (remoteData.revision >= syncRecord.envelope.revision) {
-            syncRecord.status = 'CONFLICT';
+            syncRecord.status = 'NEEDS_USER_REVIEW';
             syncRecord.lastErrorCode = 'REMOTE_CHANGED_WHILE_LOCAL_PENDING';
+            const auditEntry: NonNullable<SyncRecord['auditHistory']>[number] = {
+              at: new Date().toISOString(), status: 'NEEDS_USER_REVIEW', reason: 'REMOTE_CHANGED_WHILE_LOCAL_PENDING',
+            };
+            syncRecord.auditHistory = [...(syncRecord.auditHistory ?? []), auditEntry].slice(-20);
             setOps.push([syncKey, syncRecord]);
           }
         } else if (!localData || remoteData.revision > localData.revision) {
@@ -158,6 +166,8 @@ export class SyncManager {
     const docRef = doc(db, 'users', envelope.humanUserId, collectionName, docId);
 
     record.status = 'SENDING';
+    record.attemptCount = (record.attemptCount ?? 0) + 1;
+    record.lastAttemptAt = new Date().toISOString();
     await set(key, record);
     this.notify();
 
@@ -190,6 +200,7 @@ export class SyncManager {
       
       record.status = 'SYNCED';
       record.acknowledgedRevision = envelope.revision;
+      record.lastCompletedAt = new Date().toISOString();
       delete record.lastErrorCode;
       await set(key, record);
       this.notify();
@@ -222,12 +233,13 @@ export class SyncManager {
         console.error("Sync upload terminal failure: UPLOAD_FAILED");
       }
 
-      if (isTerminal) {
-         record.status = 'CONFLICT';
+      if (isTerminal || (!isNetworkError && errorCode === 'UPLOAD_FAILED' && (record.attemptCount ?? 0) >= 3)) {
+         record.status = 'NEEDS_USER_REVIEW';
       } else {
          record.status = 'FAILED';
       }
       record.lastErrorCode = errorCode;
+      record.auditHistory = [...(record.auditHistory ?? []), { at: new Date().toISOString(), status: record.status, reason: errorCode }].slice(-20);
       
       await set(key, record);
       this.notify();
@@ -259,6 +271,9 @@ export class SyncManager {
   async resolveWithRemote(humanUserId: string, record: SyncRecord): Promise<void> {
     const remote = await getDoc(doc(db, 'users', humanUserId, `${record.type}Drafts`, record.envelope.globalId));
     const localKey = `drafts_${humanUserId}_${record.type}_${record.envelope.globalId}`;
+    await set(`sync_audit_${humanUserId}_${record.type}_${record.envelope.globalId}_${Date.now()}`, {
+      ...record, status: 'NEEDS_USER_REVIEW', auditHistory: [...(record.auditHistory ?? []), { at: new Date().toISOString(), status: 'NEEDS_USER_REVIEW', reason: record.lastErrorCode }].slice(-20),
+    });
     if (remote.exists()) {
       const value = remote.data() as DraftEnvelope<PublishableContent>;
       if (value.humanUserId !== humanUserId) throw new Error('OWNERSHIP_CONFLICT');

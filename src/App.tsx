@@ -10,6 +10,7 @@ import EntitlementGate from "./ui/components/EntitlementGate";
 import { env } from "./config/env";
 import { crossAppRepository } from "./repositories/CrossAppRepository";
 import { syncManager } from "./repositories/SyncManager";
+import SyncActivityIndicator from "./ui/components/SyncActivityIndicator";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
 const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
@@ -32,7 +33,7 @@ function Navigation() {
     { icon: Library, label: "Exercises", path: "/library/exercises" },
     { icon: UserRound, label: "My Exercises", path: "/my-exercises" },
     { icon: Activity, label: "Protocols", path: "/library/protocols" },
-    { icon: Activity, label: "Conflicts", path: "/conflicts" },
+    { icon: Activity, label: "Issues needing attention", path: "/conflicts" },
     { icon: Settings, label: "Account", path: "/account" },
   ];
 
@@ -131,6 +132,7 @@ export default function App() {
       <div className="flex h-screen bg-hv-bg text-hv-text overflow-hidden">
         <Navigation />
         <main className="flex-1 overflow-y-auto relative">
+          <SyncActivityIndicator identity={identity} />
           <Suspense fallback={<div className="p-8 text-hv-text-muted">Loading...</div>}>
             <Routes>
               <Route path="/" element={<EntitlementGate entitlement={entitlement}><Dashboard identity={identity} /></EntitlementGate>} />

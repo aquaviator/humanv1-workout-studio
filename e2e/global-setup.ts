@@ -6,6 +6,14 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 const projectId = 'demo-humanv1-workout-studio';
 const uid = 'browser_owner_uid';
 const owner = 'human_browser_owner';
+const exercise = { schemaVersion: 1, exerciseId: 'browser_push_up', displayName: 'Push Up', category: 'Strength', equipment: [], aliases: [], trackingCapabilities: ['repetitions'] };
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+}
 
 async function waitForEmulator(url: string) {
   const deadline = Date.now() + 20_000;
@@ -30,7 +38,7 @@ export default async function globalSetup() {
   await auth.createUser({ uid, email: 'browser-owner@example.test', password: 'browser-password-123', displayName: 'Browser Owner' });
 
   const db = getFirestore(app);
-  const checksum = createHash('sha256').update('[]').digest('hex');
+  const checksum = createHash('sha256').update(canonicalJson([exercise])).digest('hex');
   const batch = db.batch();
   batch.set(db.doc(`accounts/${uid}`), { schemaVersion: 1, humanUserId: owner, status: 'ACTIVE' });
   batch.set(db.doc(`users/${owner}`), { schemaVersion: 1, ownerFirebaseUid: uid, status: 'ACTIVE', displayName: 'Browser Owner' });
@@ -41,9 +49,10 @@ export default async function globalSetup() {
   });
   batch.set(db.doc('exercise_catalogue/current'), { releaseId: 'browser-catalogue', status: 'published', channel: 'production' });
   batch.set(db.doc('exercise_catalogue_releases/browser-catalogue'), {
-    schemaVersion: 1, releaseId: 'browser-catalogue', catalogueVersion: 'browser-1', exerciseCount: 0,
+    schemaVersion: 1, releaseId: 'browser-catalogue', catalogueVersion: 'browser-1', exerciseCount: 1,
     contentSha256: checksum, status: 'published', validationStatus: 'validated', channel: 'production', createdAt: FieldValue.serverTimestamp(),
   });
+  batch.set(db.doc('exercise_catalogue_releases/browser-catalogue/exercises/browser_push_up'), exercise);
   await batch.commit();
   await deleteApp(app);
   for (const stale of getApps().filter(item => item.name === 'browser-acceptance')) await deleteApp(stale);
