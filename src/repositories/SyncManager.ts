@@ -87,11 +87,25 @@ export class SyncManager {
 
   private async syncPendingOnce(): Promise<void> {
     const allKeys = await keys();
-    const syncKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('sync_'));
+    const priority = (key: string) => key.startsWith('sync_pub_')
+      ? key.includes('_workout_') ? 0 : key.includes('_protocol_') ? 1 : key.includes('_plan_') ? 2 : 3
+      : 4;
+    // IndexedDB key enumeration is not a publication contract. Always make immutable
+    // workout dependencies durable before the plan envelope that names them.
+    const syncKeys = allKeys.filter((k): k is string => typeof k === 'string' && k.startsWith('sync_'))
+      .sort((a, b) => priority(a) - priority(b) || a.localeCompare(b));
     for (const key of syncKeys) {
-      const record = await get<SyncRecord>(key as string);
+      const record = await get<SyncRecord>(key);
       if (record && (record.status === 'QUEUED' || record.status === 'FAILED')) {
-        await this.uploadRecord(key as string, record);
+        if (record.syncType === 'publication' && record.type === 'plan') {
+          const dependencies = (record.envelope as PublishedEnvelope<PublishableContent>).payload as { workoutVersionIds?: string[] };
+          const blocked = await Promise.all((dependencies.workoutVersionIds ?? []).map(async versionId => {
+            const dependency = await get<SyncRecord>(`sync_pub_${record.envelope.humanUserId}_workout_${versionId}`);
+            return dependency != null && dependency.status !== 'SYNCED';
+          }));
+          if (blocked.some(Boolean)) continue;
+        }
+        await this.uploadRecord(key, record);
       }
     }
   }

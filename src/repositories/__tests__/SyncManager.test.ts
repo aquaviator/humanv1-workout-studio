@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Workout } from '../../domain/types';
 import { PublishedEnvelope } from '../../domain/publication';
 
-const state = vi.hoisted(() => ({ values: new Map<string, unknown>(), transactionFailure: null as Error | null, transactionCount: 0 }));
+const state = vi.hoisted(() => ({ values: new Map<string, unknown>(), transactionFailure: null as Error | null, transactionCount: 0, uploaded: [] as string[] }));
 vi.mock('idb-keyval', () => ({
   get: vi.fn((key: string) => Promise.resolve(state.values.get(key))),
   set: vi.fn((key: string, value: unknown) => { state.values.set(key, structuredClone(value)); return Promise.resolve(); }),
@@ -10,11 +10,11 @@ vi.mock('idb-keyval', () => ({
 }));
 vi.mock('../../config/firebase', () => ({ db: {} }));
 vi.mock('firebase/firestore', () => ({
-  doc: vi.fn(() => ({})), collection: vi.fn(), query: vi.fn(), getDocs: vi.fn(),
-  runTransaction: vi.fn(async (_db, callback: (transaction: { get: () => Promise<{ exists: () => boolean }>; set: () => void }) => Promise<void>) => {
+  doc: vi.fn((_db, ...segments: string[]) => ({ id: segments.at(-1) })), collection: vi.fn(), query: vi.fn(), getDocs: vi.fn(),
+  runTransaction: vi.fn(async (_db, callback: (transaction: { get: () => Promise<{ exists: () => boolean }>; set: (ref: { id?: string }) => void }) => Promise<void>) => {
     state.transactionCount++;
     if (state.transactionFailure) throw state.transactionFailure;
-    await callback({ get: async () => ({ exists: () => false }), set: () => undefined });
+    await callback({ get: async () => ({ exists: () => false }), set: (ref: { id?: string }) => { if (ref.id) state.uploaded.push(ref.id); } });
   }),
 }));
 
@@ -29,7 +29,7 @@ const envelope: PublishedEnvelope<Workout> = {
 };
 
 describe('SyncManager publication replay', () => {
-  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
+  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; state.uploaded.length = 0; Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
 
   it('durably queues offline and a reconstructed manager sees the queue', async () => {
     const manager = new SyncManager();
@@ -69,5 +69,16 @@ describe('SyncManager publication replay', () => {
     await Promise.all([manager.syncPending(), manager.syncPending(), manager.syncPending()]);
     expect(state.transactionCount).toBe(1);
     expect((await manager.listPublicationSyncRecords('human-1', 'workout'))[0].status).toBe('SYNCED');
+  });
+
+  it('replays immutable workout dependencies before a plan regardless of key insertion order', async () => {
+    const planEnvelope = { ...envelope, versionId: 'plan_r1_checksum', globalId: 'plan', contentType: 'plan' as const,
+      schemaVersion: 'humanv1.plan/1', payload: { schemaVersion: 'humanv1.plan/1', planId: 'plan', title: 'Plan', weeks: [], workoutVersionIds: [envelope.versionId] } };
+    state.values.set(`sync_pub_human-1_plan_${planEnvelope.versionId}`, { envelope: planEnvelope, syncType: 'publication', status: 'QUEUED', type: 'plan' });
+    state.values.set(`sync_pub_human-1_workout_${envelope.versionId}`, { envelope, syncType: 'publication', status: 'QUEUED', type: 'workout' });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    const manager = new SyncManager();
+    await manager.syncPending();
+    expect(state.uploaded).toEqual([envelope.versionId, planEnvelope.versionId]);
   });
 });
