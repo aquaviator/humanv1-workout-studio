@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "humanv1.fixture-manifest/1",
+  "classification": "DEMO_FIXTURE",
+  "workoutCount": 21,
+  "planCount": 3,
+  "workoutChecksums": {
+    "demo_strength_push": "62ec7f7a4b68e60d5c175256c58bc2ad549fd10ae2d7a4329bd1fe5de264afb4",
+    "demo_strength_pull": "412c882d6717b5cb81b416edc029b179d043dfd2784737c78b81090e9f78ecb5",
+    "demo_strength_legs": "1b85fc47461a3d735e1e13f024b546e0bf4dcb5cf5ef63c6883ac085aa40d7b8",
+    "demo_strength_full_body": "ad67ca5e4d9b5a41467bb04f7c0373782e587f18b63fa3ef3f07454819d0f7bf",
+    "demo_strength_upper_lower": "e6c61bbaed64123e17978420171052666d675c2e10a024aec313db4d86af0381",
+    "demo_run_easy": "f2cd56b3f9ee8264d14a7bbcb6332f5264fcb7121441f059804fa8ae41c4be85",
+    "demo_run_tempo": "8976f856b924c23c721e86b32d154748bc7fee2fb789eff6243d0a932078022b",
+    "demo_run_intervals": "b3f6fa079eed472d7ba761da7b873d0f37882eac50793cfd5a4bf12ad52cae57",
+    "demo_run_long": "df5114d47c152d0804448930eb9958814ed394775aae480a145583647ab9ec09",
+    "demo_run_walk": "a6b31a0c9c777f6714f563ca2a5e230847b6f33cc565336444b4eb01e8fe08d3",
+    "demo_cycle_endurance": "03385b6dc072c21aab53c3dc5cdd3deef49f213915e88e51ffa28995887aaed6",
+    "demo_cycle_tempo": "7570997421787dfa8ea9e5de0a7ef14aa46e265519186f040e57887e5822d3d0",
+    "demo_cycle_threshold": "77f8b9c27149b7d8b596a6761ba437c6e8667367a1ec32e6cae0ca6589fee72b",
+    "demo_swim_technique": "fd9080a5ef6ec5a5280508ec76fd64b4349a2563104f092907448ebf00d4ecf9",
+    "demo_swim_aerobic": "fc91b6f088946ad61b73a3bcf58211377ba569a8f78c07385a31aff849896646",
+    "demo_swim_css": "48f381cf8636007787cc2e18c3ef4170ddaa7eb982d268e256e5bffae2a5f59a",
+    "demo_brick_short": "6d5b71d19474c8ec7caa4a3bd40a500d3b738aabf3e6d40c006aaf360858d4c6",
+    "demo_brick_progressive": "5b5b113c9767a073c9d4aebea62806fb7e5f106b69824680d42ac30f268cc2d6",
+    "demo_timed_tabata": "bef547c4c8f44ce9f88c7357ba8bc4f16a07d247b07f2dd0242c9b60be63e115",
+    "demo_timed_emom": "ea1c7888cf4835d09861d763420c83dfb118221e8283a5084da4da411b84d344",
+    "demo_timed_amrap": "b3cf78a251920d4bd14c771576f6af11e1d79d96cf2701f6f163c9e686c42f56"
+  },
+  "planChecksums": {
+    "demo_plan_strength_week": "5faef49c85ab0cf36dcf462348b4da8e0859fc1e97b88e45d6128d993c30ecd1",
+    "demo_plan_running_4w": "2e7fc252cd9343c95d239e29774959c9360ecfab50468003b9ea6315b101a6f1",
+    "demo_plan_multisport_4w": "bd90024ec02002b422705bf33e43885250fcb3adbc2bc396e00a19abf4693464"
+  }
+}
