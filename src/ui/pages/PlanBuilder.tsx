@@ -20,16 +20,19 @@ import { PlanReconstructionStatus, PlacementReconstructionStatus } from "../comp
 import { publicationBlockReason } from "../../domain/presentation";
 import { planDeliveryRepository, PlanDeliveryAttempt, PlanDeliveryPhase } from "../../repositories/PlanDeliveryRepository";
 import { deliveryAcknowledgementRepository } from "../../repositories/DeliveryAcknowledgementRepository";
+import { PublicationDiagnosticError, transientPublicationDiagnostic, validatePlanPublicationDependencies } from "../../domain/publicationDiagnostics";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
+  const [editableWorkoutIds, setEditableWorkoutIds] = React.useState<Set<string>>(new Set());
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
   React.useEffect(() => { 
     draftRepository.listWorkoutDrafts(identity.humanUserId).then((data) => {
       setWorkoutsData(data);
+      setEditableWorkoutIds(new Set(data.map(workout => workout.workoutId)));
       setWorkoutsLoaded(true);
       crossAppRepository.listAppWorkouts(identity.humanUserId).then(app => setWorkoutsData(current => [...current, ...app.filter(remote => !current.some(local => local.workoutId === remote.workoutId))])).catch(() => undefined);
     }).catch(() => {
@@ -118,6 +121,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       phase,
       lastAttemptedAt: new Date().toISOString(),
       ...(details.failureCategory ? { failureCategory: details.failureCategory } : {}),
+      ...(details.diagnostic ? { diagnostic: details.diagnostic } : {}),
+      ...(details.diagnostics ? { diagnostics: details.diagnostics } : {}),
     };
     setDeliveryAttempt(attempt);
     await planDeliveryRepository.save(attempt);
@@ -169,7 +174,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         case 'AVAILABLE_IN_HUMANV1': return 'Available in HumanV1';
         case 'PARTIALLY_DELIVERED': return 'Partially delivered—needs attention';
         case 'CONFLICT': return 'Conflict—needs attention';
-        case 'FAILED': return `Retry required: ${deliveryAttempt.failureCategory ?? 'publication failed'}`;
+        case 'FAILED': return deliveryAttempt.diagnostic?.retryEligibility === 'NOT_RETRYABLE'
+          ? `Cannot send: ${deliveryAttempt.diagnostic.explanation}`
+          : `Retry required: ${deliveryAttempt.failureCategory ?? 'publication failed'}`;
       }
     }
     if (!syncRecord) return "Ready";
@@ -194,8 +201,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     try {
       setPublishStatus("");
       await recordDelivery('VALIDATING');
-      const errors = validatePlan(plan);
-      if (errors.length) throw new Error(errors[0].message);
+      const diagnostics = validatePlanPublicationDependencies(plan, availableWorkouts, editableWorkoutIds);
+      if (diagnostics.length) throw new PublicationDiagnosticError(diagnostics);
       
       const newPlan: Plan = JSON.parse(JSON.stringify(plan));
       if (!newPlan.startDate) newPlan.startDate = format(weekStart, 'yyyy-MM-dd');
@@ -253,8 +260,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       else if (acknowledgement?.state === 'REJECTED') await recordDelivery('PARTIALLY_DELIVERED', { ...details, failureCategory: acknowledgement.reasonCode ?? 'Plan rejected' });
       else await recordDelivery('WAITING_FOR_HUMANV1', details);
     } catch (error: unknown) {
-      const category = error instanceof Error ? error.message : 'Publication failed';
-      await recordDelivery('FAILED', { failureCategory: category });
+      const diagnostic = error instanceof PublicationDiagnosticError ? error.diagnostic : transientPublicationDiagnostic(plan, error);
+      await recordDelivery('FAILED', { failureCategory: diagnostic.errorCode, diagnostic, diagnostics: error instanceof PublicationDiagnosticError ? error.diagnostics : [diagnostic] });
     }
   };
 
@@ -417,10 +424,20 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                   </div>
               )}
             </div>
+            {deliveryAttempt?.phase === 'FAILED' && (deliveryAttempt.diagnostics ?? (deliveryAttempt.diagnostic ? [deliveryAttempt.diagnostic] : [])).length > 0 && (
+              <div role="alert" className="mb-4 rounded-md border border-hv-error p-3 text-sm text-hv-text">
+                <p className="font-semibold">Content needs attention</p>
+                <ul className="mt-2 list-disc pl-5">{(deliveryAttempt.diagnostics ?? [deliveryAttempt.diagnostic!]).map(item => <li key={`${item.entityId}:${item.fieldPath}`}>{item.explanation}</li>)}</ul>
+              </div>
+            )}
                         {displayPublishStatus && displayPublishStatus !== "Ready" && <p className="mb-4 text-hv-primary">{displayPublishStatus}</p>}
             <div className="flex justify-end gap-3">
               <button onClick={() => setIsPublishModalOpen(false)} className="px-4 py-2 text-hv-text-muted hover:text-hv-text rounded">Cancel</button>
-              <button onClick={handlePublish} disabled={deliveryAttempt?.phase === 'VALIDATING' || deliveryAttempt?.phase === 'PUBLISHING_WORKOUTS' || deliveryAttempt?.phase === 'PUBLISHING_PLAN' || deliveryAttempt?.phase === 'SENDING'} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">{deliveryAttempt?.phase === 'FAILED' ? 'Retry' : 'Send'}</button>
+              {deliveryAttempt?.phase === 'FAILED' && deliveryAttempt.diagnostic?.userCorrectableInStudio && deliveryAttempt.diagnostic.entityType === 'workout' ? (
+                <button onClick={() => navigate(`/workouts/${deliveryAttempt.diagnostic!.entityId}`)} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Review workout</button>
+              ) : (
+                <button onClick={handlePublish} disabled={deliveryAttempt?.phase === 'VALIDATING' || deliveryAttempt?.phase === 'PUBLISHING_WORKOUTS' || deliveryAttempt?.phase === 'PUBLISHING_PLAN' || deliveryAttempt?.phase === 'SENDING' || deliveryAttempt?.diagnostic?.retryEligibility === 'NOT_RETRYABLE'} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">{deliveryAttempt?.phase === 'FAILED' ? 'Retry' : 'Send'}</button>
+              )}
             </div>
             {deliveryAttempt && (
               <details className="mt-4 text-xs text-hv-text-muted">
@@ -430,6 +447,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                   <dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>
                   {deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}
                   <dt>Current phase</dt><dd>{deliveryAttempt.phase}</dd>
+                  {deliveryAttempt.diagnostic && <><dt>Error code</dt><dd>{deliveryAttempt.diagnostic.errorCode}</dd><dt>Entity</dt><dd>{deliveryAttempt.diagnostic.entityType}: {deliveryAttempt.diagnostic.displayName}</dd><dt>Field</dt><dd>{deliveryAttempt.diagnostic.fieldPath}</dd><dt>Rule</dt><dd>{deliveryAttempt.diagnostic.validationRule}</dd><dt>Next step</dt><dd>{deliveryAttempt.diagnostic.explanation}</dd></>}
                   <dt>Destination</dt><dd>Human Strength</dd>
                   <dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd>
                 </dl>
@@ -445,10 +463,11 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         <section className="mx-4 md:mx-8 mt-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4" aria-live="polite" aria-label="Plan delivery status">
           <h2 className="font-semibold text-hv-text">{displayPublishStatus}</h2>
           <p className="mt-1 text-sm text-hv-text-muted">Destination: Human Strength</p>
-          {deliveryAttempt.phase === 'FAILED' && <button onClick={handlePublish} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Retry</button>}
+          {deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.retryEligibility === 'RETRYABLE' && <button onClick={handlePublish} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Retry</button>}
+          {deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.userCorrectableInStudio && deliveryAttempt.diagnostic.entityType === 'workout' && <button onClick={() => navigate(`/workouts/${deliveryAttempt.diagnostic!.entityId}`)} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Review workout</button>}
           <details className="mt-3 text-xs text-hv-text-muted">
             <summary className="cursor-pointer">Delivery details</summary>
-            <dl className="mt-2 break-all"><dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>{deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}<dt>Phase</dt><dd>{deliveryAttempt.phase}</dd><dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd></dl>
+            <dl className="mt-2 break-all"><dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>{deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}<dt>Phase</dt><dd>{deliveryAttempt.phase}</dd>{deliveryAttempt.diagnostic && <><dt>Error code</dt><dd>{deliveryAttempt.diagnostic.errorCode}</dd><dt>Entity</dt><dd>{deliveryAttempt.diagnostic.entityType}: {deliveryAttempt.diagnostic.displayName}</dd><dt>Field</dt><dd>{deliveryAttempt.diagnostic.fieldPath}</dd><dt>Rule</dt><dd>{deliveryAttempt.diagnostic.validationRule}</dd><dt>Next step</dt><dd>{deliveryAttempt.diagnostic.explanation}</dd></>}<dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd></dl>
           </details>
         </section>
       )}

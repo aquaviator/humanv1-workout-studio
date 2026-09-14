@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
+import { axe } from 'jest-axe';
 
 const state = vi.hoisted(() => ({
   phases: [] as string[],
@@ -9,7 +10,7 @@ const state = vi.hoisted(() => ({
     schemaVersion: 'humanv1.plan/1', planId: 'plan_send_fixture', title: 'Plan', description: '',
     weeks: [{ weekId: 'week_1', weekNumber: 1, label: 'Week 1', placements: [{ placementId: 'placement_1', dayOfWeek: 1, workoutId: 'workout_1', workoutVersionId: 'workout_1_v1', preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] }],
   },
-  workout: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_1', title: 'Andy Test Workout', discipline: 'STRENGTH', catalogueReleaseId: 'fixture', tags: [], blocks: [] },
+  workout: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_1', title: 'Andy Test Workout', discipline: 'STRENGTH', catalogueReleaseId: 'fixture', tags: [], blocks: [{ blockId: 'block_1', type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Squat', efforts: [{ effortId: 'set_1', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'reps_1', metricKey: 'repetitions', targetValue: 5 }] }] }] },
 }));
 
 vi.mock('../../../repositories/DraftRepository', () => ({ draftRepository: {
@@ -44,6 +45,7 @@ describe('Plan Send journey', () => {
       ? { versionId: 'workout_1_r1_workouthash', contentChecksum: 'a'.repeat(64), publicationState: 'PUBLISHED' }
       : { versionId: 'plan_send_fixture_r1_planhash', contentChecksum: 'b'.repeat(64), publicationState: 'PUBLISHED' });
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    state.workout.blocks = [{ blockId: 'block_1', type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Squat', efforts: [{ effortId: 'set_1', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'reps_1', metricKey: 'repetitions', targetValue: 5 }] }] }];
   });
 
   it('the confirmation Send button executes dependency and plan publication and never claims device delivery', async () => {
@@ -58,5 +60,29 @@ describe('Plan Send journey', () => {
     expect(state.phases).toEqual(['VALIDATING', 'PUBLISHING_WORKOUTS', 'PUBLISHING_PLAN', 'SENDING', 'SENT_TO_HUMANV1', 'WAITING_FOR_HUMANV1']);
     expect(await screen.findByRole('heading', { name: 'Waiting for HumanV1' })).toBeInTheDocument();
     expect(screen.queryByText(/Available in HumanV1/i)).not.toBeInTheDocument();
+  });
+
+  it('fails before partial publication and offers an accessible correction instead of deterministic Retry', async () => {
+    state.workout.blocks = [];
+    render(<MemoryRouter initialEntries={['/plans/plan_send_fixture']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={{ humanUserId: 'synthetic_owner', email: 'owner@example.test', displayName: 'Owner' }} />} /></Routes></MemoryRouter>);
+    await screen.findByDisplayValue('Plan');
+    fireEvent.click(screen.getByRole('button', { name: 'Send plan to my apps' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send' }));
+    expect(await screen.findByRole('heading', { name: /Cannot send: Andy Test Workout cannot be sent because it has no executable exercise blocks/ })).toBeInTheDocument();
+    expect(state.publish).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Review workout' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('WORKOUT_REQUIRES_EXECUTABLE_BLOCK').length).toBeGreaterThan(0);
+    expect(await axe(screen.getByRole('alert'))).toHaveNoViolations();
+  });
+
+  it('keeps transient delivery failures retryable', async () => {
+    state.publish.mockRejectedValueOnce(new Error('UPLOAD_FAILED'));
+    render(<MemoryRouter initialEntries={['/plans/plan_send_fixture']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={{ humanUserId: 'synthetic_owner', email: 'owner@example.test', displayName: 'Owner' }} />} /></Routes></MemoryRouter>);
+    await screen.findByDisplayValue('Plan');
+    fireEvent.click(screen.getByRole('button', { name: 'Send plan to my apps' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send' }));
+    expect(await screen.findByRole('heading', { name: /Retry required: UPLOAD_FAILED/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThan(0);
   });
 });

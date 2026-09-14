@@ -4,9 +4,10 @@ import { ContentType, compileProtocolTimeline, CompiledProtocolStep, Publishable
 import { Plan, Protocol, Workout } from '../domain/types';
 import { validatePlan } from '../domain/validation/planValidation';
 import { validateProtocol } from '../domain/validation/protocolValidation';
-import { validateWorkout } from '../domain/validation/workoutValidation';
+import { validateWorkoutForPublication } from '../domain/validation/workoutValidation';
 import { syncManager } from './SyncManager';
 import { authRepository } from './AuthManager';
+import { diagnosticForWorkoutValidation, PublicationDiagnosticError } from '../domain/publicationDiagnostics';
 
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -34,8 +35,13 @@ export class PublicationRepository {
   async publish<T extends PublishableContent>(trustedHumanUserId: string, contentType: ContentType, globalId: string, payload: T, _compatibleTags?: readonly string[], suppliedTimeline?: CompiledProtocolStep[]): Promise<PublishedEnvelope<T>> {
     const actualId = contentType === 'workout' ? (payload as Workout).workoutId : contentType === 'plan' ? (payload as Plan).planId : (payload as Protocol).protocolId;
     if (actualId !== globalId) throw new Error('CONTENT_ID_MISMATCH');
-    const errors = contentType === 'workout' ? validateWorkout(payload as Workout, []) : contentType === 'plan' ? validatePlan(payload as Plan) : validateProtocol(payload as Protocol);
-    if (errors.length) throw new Error('INVALID_CONTENT');
+    const errors = contentType === 'workout' ? validateWorkoutForPublication(payload as Workout, []) : contentType === 'plan' ? validatePlan(payload as Plan) : validateProtocol(payload as Protocol);
+    if (errors.length) {
+      const diagnostic = contentType === 'workout'
+        ? diagnosticForWorkoutValidation(payload as Workout, errors[0], true)
+        : { errorCode: 'INVALID_CONTENT', entityType: contentType, entityId: globalId, displayName: (payload as Plan | Protocol).title || 'Untitled', fieldPath: 'content', validationRule: 'CONTENT_INVALID', explanation: errors[0].message, userCorrectableInStudio: true, sourceMigrationRequired: false, retryEligibility: 'NOT_RETRYABLE' } as const;
+      throw new PublicationDiagnosticError(diagnostic);
+    }
     const compiledTimeline = contentType === 'protocol' ? compileProtocolTimeline(payload as Protocol) : undefined;
     if (suppliedTimeline && canonicalize(suppliedTimeline) !== canonicalize(compiledTimeline)) throw new Error('INVALID_COMPILED_TIMELINE');
     const checksum = await this.generateChecksum(payload);

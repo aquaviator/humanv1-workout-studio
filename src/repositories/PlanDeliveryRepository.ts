@@ -1,4 +1,5 @@
 import { get, set } from 'idb-keyval';
+import type { PublicationDiagnostic } from '../domain/publicationDiagnostics';
 
 export type PlanDeliveryPhase =
   | 'VALIDATING'
@@ -23,6 +24,8 @@ export interface PlanDeliveryAttempt {
   phase: PlanDeliveryPhase;
   lastAttemptedAt: string;
   failureCategory?: string;
+  diagnostic?: PublicationDiagnostic;
+  diagnostics?: PublicationDiagnostic[];
 }
 
 const keyFor = (owner: string, planId: string) => `plan_delivery_${owner}_${planId}`;

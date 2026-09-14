@@ -18,6 +18,17 @@ describe("CrossAppRepository", () => {
     expect(workout.blocks[0]).toMatchObject({ exerciseId: "private_12345678", exerciseNameSnapshot: "Private row", efforts: [{ effortType: "TIMED", prescriptions: [{ metricKey: "duration", targetValue: 90 }] }] });
   });
 
+  it("does not fabricate an open set when Android source set content is absent", async () => {
+    const records: Record<string, Record<string, unknown>[]> = {
+      templates: [{ globalId: "template_no_sets", humanUserId: "human_1", name: "No sets", deletedAt: null }],
+      templateExercises: [{ globalId: "slot_no_sets", humanUserId: "human_1", templateGlobalId: "template_no_sets", exerciseId: "squat", position: 0, deletedAt: null }],
+      templateSets: [], customExercises: [],
+    };
+    const repo = new CrossAppRepository(async (_owner, name) => records[name] || [], async () => {}, () => true);
+    const [item] = await repo.listAppWorkouts("human_1");
+    expect(item.blocks[0]).toMatchObject({ blockId: "slot_no_sets", type: "EXERCISE", efforts: [] });
+  });
+
   it("owner-filters private records and retains archived snapshots", async () => {
     const repo = new CrossAppRepository(async () => [
       { globalId: "custom_12345678", id: "custom_12345678", humanUserId: "human_1", isCustom: true, name: "Mine", category: "Mobility", revision: 3, createdAt: 1, updatedAt: 2, deletedAt: 2 },

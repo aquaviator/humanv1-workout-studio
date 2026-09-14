@@ -256,7 +256,7 @@ export class CrossAppRepository {
             ...(typeof item.targetDurationSeconds === "number" ? [{ prescriptionId: `${asString(item.globalId)}_duration`, metricKey: "duration", targetValue: asNumber(item.targetDurationSeconds), canonicalUnit: "s" }] : []),
             ...(typeof item.targetDistance === "number" ? [{ prescriptionId: `${asString(item.globalId)}_distance`, metricKey: "distance", targetValue: asNumber(item.targetDistance), canonicalUnit: "m" }] : []),
           ] }));
-          return { blockId: childId, type: "EXERCISE" as const, exerciseId: asString(child.exerciseId), exerciseNameSnapshot: asString((child.extensions as CloudDoc)?.exerciseNameSnapshot, asString(child.exerciseId)), notes: asString(child.notes) || undefined, efforts: efforts.length ? efforts : [{ effortId: `${childId}_open`, effortType: "OPEN", prescriptions: [] }] };
+          return { blockId: childId, type: "EXERCISE" as const, exerciseId: asString(child.exerciseId), exerciseNameSnapshot: asString((child.extensions as CloudDoc)?.exerciseNameSnapshot, asString(child.exerciseId)), notes: asString(child.notes) || undefined, efforts };
         }),
       };
     });

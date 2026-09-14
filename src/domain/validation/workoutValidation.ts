@@ -5,6 +5,8 @@ import { blocksPublication } from "../presentation";
 export interface ValidationError {
   blockId?: string;
   effortId?: string;
+  fieldPath?: string;
+  rule?: string;
   message: string;
 }
 
@@ -13,11 +15,11 @@ export function validateWorkout(workout: Workout, catalogue: Exercise[]): Valida
   if (blocksPublication(workout.reconstructionDiagnostics)) errors.push({ message: "Publication is unavailable because original workout details cannot be verified." });
 
   if (!workout.title || workout.title.trim() === "") {
-    errors.push({ message: "Workout is missing a title." });
+    errors.push({ fieldPath: "title", rule: "WORKOUT_TITLE_REQUIRED", message: "Workout is missing a title." });
   }
 
   if (workout.blocks.length === 0) {
-    errors.push({ message: "Workout is empty. Add some exercises." });
+    errors.push({ fieldPath: "blocks", rule: "WORKOUT_REQUIRES_EXECUTABLE_BLOCK", message: "Workout has no executable exercise blocks." });
   }
 
   const seenIds = new Set<string>();
@@ -105,4 +107,20 @@ function checkExerciseBlock(
       }
     });
   });
+}
+
+/** Strict delivery contract; draft editing may temporarily contain incomplete rows. */
+export function validateWorkoutForPublication(workout: Workout, catalogue: Exercise[]): ValidationError[] {
+  const errors = validateWorkout(workout, catalogue);
+  const exerciseBlocks = workout.blocks.flatMap(block =>
+    block.type === "EXERCISE" ? [{ block, parentId: block.blockId }] : block.type === "SUPERSET" || block.type === "CIRCUIT"
+      ? block.exercises.map(child => ({ block: child, parentId: block.blockId })) : []
+  );
+  if (workout.blocks.length > 0 && exerciseBlocks.length === 0) errors.push({ fieldPath: "blocks", rule: "WORKOUT_REQUIRES_EXECUTABLE_BLOCK", message: "Workout has no executable exercise blocks." });
+  for (const { block, parentId } of exerciseBlocks) {
+    if (!block.exerciseId?.trim()) errors.push({ blockId: parentId, fieldPath: `blocks[${parentId}].exerciseId`, rule: "EXERCISE_REFERENCE_REQUIRED", message: "Exercise block is missing an executable exercise reference." });
+    if (block.efforts.length === 0) errors.push({ blockId: parentId, fieldPath: `blocks[${parentId}].efforts`, rule: "SET_CONTENT_REQUIRED", message: "Exercise block has no set content." });
+    for (const effort of block.efforts) if (effort.prescriptions.length === 0) errors.push({ blockId: parentId, effortId: effort.effortId, fieldPath: `blocks[${parentId}].efforts[${effort.effortId}].prescriptions`, rule: "SET_CONTENT_REQUIRED", message: "Set has no executable prescription." });
+  }
+  return errors;
 }
