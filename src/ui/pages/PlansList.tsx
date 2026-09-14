@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { HumanIdentity } from "../../domain/identity";
 import { Plan } from "../../domain/types";
 import { draftRepository } from "../../repositories/DraftRepository";
 import { crossAppRepository } from "../../repositories/CrossAppRepository";
 import ReconstructionDiagnostics from "../components/ReconstructionDiagnostics";
+import { TriathlonResearchLibrary } from "../components/TriathlonResearchLibrary";
+import { cloneResearchPlanToDraft } from "../../fixtures/triathlonResearchFixtures";
 
 export default function PlansList({ identity }: { identity: HumanIdentity }) {
+  const navigate = useNavigate();
   const [plans, setPlans] = useState<Plan[]>([]);
   useEffect(() => {
     Promise.all([draftRepository.listPlanDrafts(identity.humanUserId), crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])]).then(([local, app]) => setPlans([...local, ...app.filter(remote => !local.some(item => item.planId === remote.planId))]));
@@ -34,6 +37,7 @@ export default function PlansList({ identity }: { identity: HumanIdentity }) {
           </article>
         ))}
       </div>
+      <TriathlonResearchLibrary onClone={async source => { const draft = cloneResearchPlanToDraft(source, identity.humanUserId); await draftRepository.savePlanDraft(identity.humanUserId, draft); navigate(`/plans/${draft.planId}`); }} />
     </div>
   );
 }
