@@ -2,6 +2,8 @@
   "contractVersion": "humanv1.canonical-contract/1",
   "workoutSchemaVersion": "humanv1.canonical-workout/1",
   "planSchemaVersion": "humanv1.canonical-plan/1",
+  "planScheduleSchemaVersion": "1.2",
+  "dayModel": { "dayTypes": ["REST", "TRAINING"], "multipleOrderedAssignments": true, "variableDurationRacePlaceholders": true },
   "contentClasses": ["GOVERNED_LIBRARY", "USER_AUTHORED", "LEGACY_NORMALIZABLE", "LEGACY_INCOMPLETE", "HISTORICAL_EXECUTION", "CONFLICTED"],
   "executionStructures": ["STRAIGHT_SETS", "SUPERSET", "CIRCUIT", "INTERVAL", "AMRAP", "EMOM", "TIME_CAP", "DISTANCE", "RUN_WALK", "CYCLING_INTERVAL", "SWIM_INTERVAL", "BRICK", "TRANSITION", "RECOVERY", "WARM_UP", "COOL_DOWN"],
   "normalizationClassifications": ["ALREADY_CANONICAL", "SAFE_NORMALIZATION_AVAILABLE", "USER_REVIEW_REQUIRED", "OWNERSHIP_CONFLICT", "REVISION_CONFLICT", "UNSUPPORTED_SCHEMA", "HISTORICAL_PRESERVE_ONLY"],

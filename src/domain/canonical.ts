@@ -35,14 +35,16 @@ export interface CanonicalPlanPlacement {
   placementId: string; order: number; daySlot: number; workoutVersionId: string; required: boolean; priority: boolean; adaptation: "FIXED" | "OPTIONAL" | "ADAPTIVE";
   recurrence?: { frequency: "WEEKLY"; interval: number; count?: number };
 }
-export interface CanonicalPlanWeek { weekId: string; order: number; recoveryWeek: boolean; placements: CanonicalPlanPlacement[] }
+export interface CanonicalDayAssignment { assignmentId: string; orderWithinDay: number; assignmentType: "SESSION" | "OPTIONAL_SESSION" | "RACE"; workoutVersionId: string; required: boolean; priority: "REQUIRED" | "OPTIONAL" | "PRIORITY"; variableDuration?: boolean }
+export interface CanonicalPlanDay { dayOfWeek: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"; order: number; dayType: "REST" | "TRAINING"; assignments: CanonicalDayAssignment[] }
+export interface CanonicalPlanWeek { weekId: string; order: number; recoveryWeek: boolean; placements: CanonicalPlanPlacement[]; days?: CanonicalPlanDay[] }
 export interface CanonicalPlanPhase { phaseId: string; order: number; title: string; cycleIds: string[] }
 export interface CanonicalPlanCycle { cycleId: string; order: number; title: string; weekIds: string[] }
 export interface CanonicalPlan {
   schemaVersion: typeof CANONICAL_PLAN_SCHEMA; planGlobalId: string; publicationVersionId?: string; revision: number; checksum: string;
   owner: CanonicalOwner | null; provenance: CanonicalProvenance; title: string; goal: string; athleteLevel: "BEGINNER" | "INTERMEDIATE" | "ADVANCED" | "ALL";
   durationWeeks: number; timezone: string; startDate: string; targetEvent?: { title: string; date: string }; phases: CanonicalPlanPhase[]; cycles: CanonicalPlanCycle[];
-  weeks: CanonicalPlanWeek[]; publicationEligibility: PublicationEligibility; validationStatus: "VALID" | "INVALID" | "REVIEW_REQUIRED";
+  scheduleSchemaVersion?: "1.2"; weeks: CanonicalPlanWeek[]; publicationEligibility: PublicationEligibility; validationStatus: "VALID" | "INVALID" | "REVIEW_REQUIRED";
   createdAt: string; updatedAt: string; tombstoneState: "ACTIVE" | "TOMBSTONED"; acknowledgement?: { applicationId: string; versionId: string; checksum: string; state: "PENDING" | "APPLIED" | "REJECTED" };
 }
 
@@ -84,7 +86,10 @@ export function validateCanonicalPlan(value: CanonicalPlan): CanonicalIssue[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value.startDate)) issues.push({ fieldPath: "startDate", rule: "EXPLICIT_DATE_REQUIRED", explanation: "Plan start date must be explicit." });
   if (!value.timezone.trim()) issues.push({ fieldPath: "timezone", rule: "TIMEZONE_REQUIRED", explanation: "Plan timezone is required." });
   if (value.durationWeeks !== value.weeks.length) issues.push({ fieldPath: "durationWeeks", rule: "DURATION_MATCH", explanation: "Plan duration must match its ordered weeks." });
-  const ids = new Set<string>(); value.weeks.forEach((week, wi) => week.placements.forEach((placement, pi) => { if (ids.has(placement.placementId)) issues.push({ fieldPath: `weeks[${wi}].placements[${pi}].placementId`, rule: "STABLE_ID_UNIQUE", explanation: "Placement ID is duplicated." }); ids.add(placement.placementId); if (!placement.workoutVersionId) issues.push({ fieldPath: `weeks[${wi}].placements[${pi}].workoutVersionId`, rule: "IMMUTABLE_DEPENDENCY_REQUIRED", explanation: "Placement requires an immutable workout version." }); }));
+  const ids = new Set<string>(); value.weeks.forEach((week, wi) => {
+    week.placements.forEach((placement, pi) => { if (ids.has(placement.placementId)) issues.push({ fieldPath: `weeks[${wi}].placements[${pi}].placementId`, rule: "STABLE_ID_UNIQUE", explanation: "Placement ID is duplicated." }); ids.add(placement.placementId); if (!placement.workoutVersionId) issues.push({ fieldPath: `weeks[${wi}].placements[${pi}].workoutVersionId`, rule: "IMMUTABLE_DEPENDENCY_REQUIRED", explanation: "Placement requires an immutable workout version." }); });
+    week.days?.forEach((day, di) => { if (day.dayType === "REST" && day.assignments.length) issues.push({ fieldPath: `weeks[${wi}].days[${di}]`, rule: "REST_HAS_NO_ASSIGNMENTS", explanation: "Rest days cannot contain assignments." }); if (day.dayType === "TRAINING" && !day.assignments.length) issues.push({ fieldPath: `weeks[${wi}].days[${di}]`, rule: "TRAINING_REQUIRES_ASSIGNMENT", explanation: "Training days need at least one assignment." }); day.assignments.forEach((assignment, ai) => { if (ids.has(assignment.assignmentId)) issues.push({ fieldPath: `weeks[${wi}].days[${di}].assignments[${ai}]`, rule: "STABLE_ID_UNIQUE", explanation: "Assignment ID is duplicated." }); ids.add(assignment.assignmentId); if (!assignment.workoutVersionId) issues.push({ fieldPath: `weeks[${wi}].days[${di}].assignments[${ai}]`, rule: "IMMUTABLE_DEPENDENCY_REQUIRED", explanation: "Assignment requires an immutable workout version." }); }); });
+  });
   if (value.checksum && value.checksum !== canonicalChecksum(value)) issues.push({ fieldPath: "checksum", rule: "CHECKSUM_MATCH", explanation: "Plan checksum does not match its canonical payload." });
   return issues;
 }
