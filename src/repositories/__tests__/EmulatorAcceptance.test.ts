@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { clear, get } from 'idb-keyval';
+import { clear, get, set } from 'idb-keyval';
 import { adminAuth, adminDb, cleanupEmulator } from '../../test/emulator';
 import { FirebaseAuthRepository } from '../FirebaseAuthRepository';
 import { FirebaseCatalogueRepository } from '../FirebaseCatalogueRepository';
@@ -236,6 +236,47 @@ describe('Emulator Acceptance', () => {
     await signInWithEmailAndPassword(auth, 'user2@example.com', 'password123');
     expect(auth.currentUser?.uid).toBe('auth_2');
     expect((await new FirebaseEntitlementRepository().getEntitlement('human_2')).state).toBe('VERIFICATION_UNAVAILABLE');
+  });
+
+  it('interrupted offline publication replay makes dependencies durable before the plan', async () => {
+    await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
+    await clear();
+    const workout = validWorkout('ordered-dependency', 'Ordered dependency');
+    const workoutChecksum = await publicationRepository.generateChecksum(workout);
+    const workoutVersionId = `${workout.workoutId}_r1_${workoutChecksum.slice(0, 12)}`;
+    const plan = { schemaVersion: 'humanv1.plan/1', planId: 'ordered-plan', title: 'Ordered plan', description: '',
+      startDate: '2026-09-14', timezone: 'Europe/London', destinationApplication: 'HUMAN_STRENGTH' as const,
+      workoutVersionIds: [workoutVersionId], weeks: [{ weekId: 'w1', weekNumber: 1, label: 'Week 1', placements: [{
+        placementId: 'p1', dayOfWeek: 1, workoutId: workout.workoutId, workoutVersionId,
+        preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] }] };
+    const planChecksum = await publicationRepository.generateChecksum(plan);
+    const now = '2026-09-14T00:00:00.000Z';
+    const workoutEnvelope = { versionId: workoutVersionId, globalId: workout.workoutId, contentType: 'workout',
+      schemaVersion: workout.schemaVersion, humanUserId: 'human_1', revision: 1, publicationState: 'PUBLISHED',
+      sourceDraftId: workout.workoutId, contentChecksum: workoutChecksum, compatibleTags: ['STRENGTH'],
+      createdAt: now, updatedAt: now, publishedAt: now, tombstoneState: 'ACTIVE', payload: workout };
+    const planVersionId = `${plan.planId}_r1_${planChecksum.slice(0, 12)}`;
+    const planEnvelope = { versionId: planVersionId, globalId: plan.planId, contentType: 'plan',
+      schemaVersion: plan.schemaVersion, humanUserId: 'human_1', revision: 1, publicationState: 'PUBLISHED',
+      sourceDraftId: plan.planId, contentChecksum: planChecksum, compatibleTags: ['PLAN'],
+      createdAt: now, updatedAt: now, publishedAt: now, tombstoneState: 'ACTIVE', payload: plan };
+    // Recreate the interrupted browser state in the unsafe insertion order: plan first.
+    await set(`sync_pub_human_1_plan_${planVersionId}`, { envelope: planEnvelope, syncType: 'publication', status: 'QUEUED', type: 'plan' });
+    await set(`sync_pub_human_1_workout_${workoutVersionId}`, { envelope: workoutEnvelope, syncType: 'publication', status: 'QUEUED', type: 'workout' });
+    let attempts = 0;
+    window.__HV1_TEST_PAUSE_PUBLICATION_SEND__ = async () => {
+      attempts++;
+      if (attempts === 2) {
+        expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(true);
+        expect((await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', planVersionId))).exists()).toBe(false);
+      }
+    };
+    await syncManager.syncPending();
+    delete window.__HV1_TEST_PAUSE_PUBLICATION_SEND__;
+    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(true);
+    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', planVersionId))).exists()).toBe(true);
+    await syncManager.syncPending();
+    expect((await getDocs(collection(db, 'users', 'human_1', 'publishedPlans'))).docs.filter(item => item.id === planVersionId)).toHaveLength(1);
   });
 
   it('serialized two-week plan projection and exact HumanV1 acknowledgement journey', async () => {
