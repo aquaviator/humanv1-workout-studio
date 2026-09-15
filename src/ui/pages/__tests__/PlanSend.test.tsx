@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../../../repositories/DraftRepository', () => ({ draftRepository: {
   listWorkoutDrafts: vi.fn(async () => [state.workout]), getPlanDraft: vi.fn(async () => state.plan),
+  listWorkoutEnvelopes: vi.fn(async () => [{ schemaVersion: 1, globalId: state.workout.workoutId, humanUserId: 'synthetic_owner', revision: 1, status: 'DRAFT', payload: state.workout, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' }]),
+  getPlanEnvelope: vi.fn(async () => ({ revision: 1 })),
   savePlanDraft: vi.fn(async () => undefined),
 } }));
 vi.mock('../../../repositories/CrossAppRepository', () => ({ crossAppRepository: {
@@ -42,7 +44,7 @@ describe('Plan Send journey', () => {
     state.phases.length = 0;
     state.publish.mockReset();
     state.publish.mockImplementation(async (type: string) => type === 'workout'
-      ? { versionId: 'workout_1_r1_workouthash', contentChecksum: 'a'.repeat(64), publicationState: 'PUBLISHED' }
+      ? { globalId: 'workout_1', revision: 1, schemaVersion: 'humanv1.workout/1', versionId: 'workout_1_r1_workouthash', contentChecksum: 'a'.repeat(64), publicationState: 'PUBLISHED' }
       : { versionId: 'plan_send_fixture_r1_planhash', contentChecksum: 'b'.repeat(64), publicationState: 'PUBLISHED' });
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     state.workout.blocks = [{ blockId: 'block_1', type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Squat', efforts: [{ effortId: 'set_1', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'reps_1', metricKey: 'repetitions', targetValue: 5 }] }] }];
@@ -68,12 +70,12 @@ describe('Plan Send journey', () => {
     await screen.findByDisplayValue('Plan');
     fireEvent.click(screen.getByRole('button', { name: 'Send plan to my apps' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send' }));
-    expect(await screen.findByRole('heading', { name: /Cannot send: Andy Test Workout cannot be sent because it has no executable exercise blocks/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Cannot send: Andy Test Workout needs attention before this plan can be sent/ })).toBeInTheDocument();
     expect(state.publish).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Review workout' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('WORKOUT_REQUIRES_EXECUTABLE_BLOCK').length).toBeGreaterThan(0);
-    expect(await axe(screen.getByRole('alert'))).toHaveNoViolations();
+    expect(screen.getAllByText('DRAFT_DEPENDENCY_INVALID').length).toBeGreaterThan(0);
+    for (const alert of screen.getAllByRole('alert')) expect(await axe(alert)).toHaveNoViolations();
   });
 
   it('keeps transient delivery failures retryable', async () => {

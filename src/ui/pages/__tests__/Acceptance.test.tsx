@@ -62,6 +62,7 @@ const { workoutsDb, protocolsDb, plansDb } = vi.hoisted(() => {
 vi.mock('../../repositories/DraftRepository', () => ({
   draftRepository: {
     listWorkoutDrafts: vi.fn().mockImplementation(() => Promise.resolve(Array.from(workoutsDb.values()))),
+    listWorkoutEnvelopes: vi.fn().mockImplementation(() => Promise.resolve(Array.from(workoutsDb.values()).map((payload: any) => ({ schemaVersion: 1, globalId: payload.workoutId, humanUserId: 'test-user', revision: 1, status: 'DRAFT', payload, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' })))),
     saveWorkoutDraft: vi.fn().mockImplementation((uid, draft) => { console.log("saveWorkoutDraft called with id:", draft.workoutId, "title:", draft.title); workoutsDb.set(draft.workoutId, draft); return Promise.resolve(); }),
     getWorkoutDraft: vi.fn().mockImplementation((uid, id) => { console.log("getWorkoutDraft called with id:", id, "found:", !!workoutsDb.get(id)); return Promise.resolve(workoutsDb.get(id) || null); }),
     listProtocolDrafts: vi.fn().mockImplementation(() => Promise.resolve(Array.from(protocolsDb.values()))),
@@ -70,6 +71,7 @@ vi.mock('../../repositories/DraftRepository', () => ({
     listPlanDrafts: vi.fn().mockImplementation(() => Promise.resolve(Array.from(plansDb.values()))),
     savePlanDraft: vi.fn().mockImplementation((uid, draft) => { plansDb.set(draft.planId, draft); return Promise.resolve(); }),
     getPlanDraft: vi.fn().mockImplementation((uid, id) => Promise.resolve(plansDb.get(id) || null)),
+    getPlanEnvelope: vi.fn().mockImplementation(() => Promise.resolve({ revision: 1 })),
   }
 }));
 

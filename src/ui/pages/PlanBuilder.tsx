@@ -21,6 +21,8 @@ import { publicationBlockReason } from "../../domain/presentation";
 import { planDeliveryRepository, PlanDeliveryAttempt, PlanDeliveryPhase } from "../../repositories/PlanDeliveryRepository";
 import { deliveryAcknowledgementRepository } from "../../repositories/DeliveryAcknowledgementRepository";
 import { PublicationDiagnosticError, transientPublicationDiagnostic, validatePlanPublicationDependencies } from "../../domain/publicationDiagnostics";
+import type { DraftEnvelope } from "../../repositories/DraftRepository";
+import { dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, validateDraftDependencies, workoutDraftDependency } from "../../domain/planDraftDependencies";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
@@ -28,11 +30,13 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const location = useLocation();
   const [workoutsData, setWorkoutsData] = React.useState<Workout[]>([]);
   const [editableWorkoutIds, setEditableWorkoutIds] = React.useState<Set<string>>(new Set());
+  const [workoutDrafts, setWorkoutDrafts] = React.useState<Map<string, DraftEnvelope<Workout>>>(new Map());
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
   React.useEffect(() => { 
-    draftRepository.listWorkoutDrafts(identity.humanUserId).then((data) => {
+    Promise.all([draftRepository.listWorkoutDrafts(identity.humanUserId), draftRepository.listWorkoutEnvelopes(identity.humanUserId)]).then(([data, envelopes]) => {
       setWorkoutsData(data);
       setEditableWorkoutIds(new Set(data.map(workout => workout.workoutId)));
+      setWorkoutDrafts(new Map(envelopes.map(envelope => [envelope.globalId, envelope])));
       setWorkoutsLoaded(true);
       crossAppRepository.listAppWorkouts(identity.humanUserId).then(app => setWorkoutsData(current => [...current, ...app.filter(remote => !current.some(local => local.workoutId === remote.workoutId))])).catch(() => undefined);
     }).catch(() => {
@@ -47,10 +51,12 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   }, [location.pathname, navigate, planId]);
   
   const initialPlan: Plan = {
-    schemaVersion: "1",
+    schemaVersion: "humanv1.studio-plan-draft/1",
     planId,
     title: "New Plan",
     description: "",
+    dependencyOwnerHumanUserId: identity.humanUserId,
+    dependencyKinds: [],
     weeks: [{
       weekId: uuidv4(),
       weekNumber: 1,
@@ -64,6 +70,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
   const [isLoading, setIsLoading] = useState(true);
   const validationErrors = React.useMemo(() => validatePlan(plan), [plan]);
+  const dependencyIssues = React.useMemo(() => validateDraftDependencies(plan, identity.humanUserId, workoutDrafts), [plan, identity.humanUserId, workoutDrafts]);
   const publicationReason = React.useMemo(() => publicationBlockReason(plan.reconstructionDiagnostics), [plan.reconstructionDiagnostics]);
 
   const today = new Date();
@@ -72,12 +79,13 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const days = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
 
   useEffect(() => {
+    if (!workoutsLoaded) return;
     let mounted = true;
     if (routePlanId) {
       draftRepository.getPlanDraft(identity.humanUserId, routePlanId).then(async (draft) => {
         if (!mounted) return;
         const appPlan = draft ? null : (await crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])).find(item => item.planId === routePlanId);
-        if (draft || appPlan) reset(draft || appPlan!);
+        if (draft || appPlan) reset(draft ? migrateLegacyPlanDraft(draft, identity.humanUserId, workoutDrafts).plan : appPlan!);
         setIsLoading(false);
       }).catch(() => {
         if (mounted) setIsLoading(false);
@@ -86,7 +94,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       setIsLoading(false);
     }
     return () => { mounted = false; };
-  }, [identity.humanUserId, reset, routePlanId]);
+  }, [identity.humanUserId, reset, routePlanId, workoutsLoaded]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -97,7 +105,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     let timeout: ReturnType<typeof setTimeout>;
     setSaveStatus("Saving...");
     timeout = setTimeout(() => {
-      draftRepository.savePlanDraft(identity.humanUserId, plan).then(() => setSaveStatus("Saved")).catch(() => setSaveStatus("Unsaved"));
+      const normalized = migrateLegacyPlanDraft(plan, identity.humanUserId, workoutDrafts).plan;
+      draftRepository.savePlanDraft(identity.humanUserId, normalized).then(() => setSaveStatus("Saved")).catch(() => setSaveStatus("Unsaved"));
     }, 500);
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading, validationErrors.length]);
@@ -107,6 +116,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   
   const [syncRecord, setSyncRecord] = useState<SyncRecord | null>(null);
   const [draftDependencies, setDraftDependencies] = useState<Workout[]>([]);
+  const [newVersionDependencies, setNewVersionDependencies] = useState<Workout[]>([]);
+  const [reusedDependencies, setReusedDependencies] = useState<Workout[]>([]);
   const [publishStatus, setPublishStatus] = useState<string>("");
   const [deliveryAttempt, setDeliveryAttempt] = useState<PlanDeliveryAttempt | null>(null);
 
@@ -201,18 +212,35 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     try {
       setPublishStatus("");
       await recordDelivery('VALIDATING');
-      const diagnostics = validatePlanPublicationDependencies(plan, availableWorkouts, editableWorkoutIds);
+      const frozenPlan = structuredClone(plan);
+      const frozenPlanEnvelope = await draftRepository.getPlanEnvelope(identity.humanUserId, plan.planId);
+      const freshDrafts = new Map((await draftRepository.listWorkoutEnvelopes(identity.humanUserId)).map(envelope => [envelope.globalId, envelope]));
+      const dependencyIssues = validateDraftDependencies(frozenPlan, identity.humanUserId, freshDrafts);
+      if (dependencyIssues.length) throw new PublicationDiagnosticError(dependencyIssues.map(issue => ({
+        errorCode: 'INVALID_CONTENT', entityType: 'workout' as const, entityId: issue.workoutId, displayName: issue.displayName,
+        fieldPath: `placements[${issue.placementId}].dependency`, validationRule: `DRAFT_DEPENDENCY_${issue.state}`,
+        explanation: issue.message, userCorrectableInStudio: true, sourceMigrationRequired: false, retryEligibility: 'NOT_RETRYABLE' as const,
+      })));
+      const diagnostics = validatePlanPublicationDependencies(frozenPlan, availableWorkouts, editableWorkoutIds);
       if (diagnostics.length) throw new PublicationDiagnosticError(diagnostics);
       
-      const newPlan: Plan = JSON.parse(JSON.stringify(plan));
+      const newPlan: Plan = structuredClone(frozenPlan);
       if (!newPlan.startDate) newPlan.startDate = format(weekStart, 'yyyy-MM-dd');
       if (!newPlan.timezone) newPlan.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const workoutVersions = new Map<string, string>();
+      const resolvedWorkouts = new Map<string, NonNullable<import("../../domain/types").PlanPlacement["resolvedWorkout"]>>();
       await recordDelivery('PUBLISHING_WORKOUTS');
       for (const week of newPlan.weeks) {
          for (const placement of week.placements) {
              const knownVersion = workoutVersions.get(placement.workoutId);
-             if (knownVersion) { placement.workoutVersionId = knownVersion; continue; }
+             if (knownVersion) { placement.workoutVersionId = knownVersion; placement.resolvedWorkout = resolvedWorkouts.get(placement.workoutId); delete placement.dependency; continue; }
+             if (placement.dependency?.kind === 'PUBLISHED_WORKOUT_VERSION') {
+               const fixed = await publicationRepository.getPublishedVersion<Workout>(identity.humanUserId, 'workout', placement.dependency.versionId);
+               if (!fixed || fixed.globalId !== placement.dependency.workoutGlobalId || fixed.revision !== placement.dependency.revision || fixed.contentChecksum !== placement.dependency.checksum || fixed.schemaVersion !== placement.dependency.schemaVersion || fixed.publicationState !== 'PUBLISHED') throw new Error('PUBLISHED_DEPENDENCY_MISMATCH');
+               placement.workoutVersionId = fixed.versionId;
+               placement.resolvedWorkout = { workoutGlobalId: fixed.globalId, versionId: fixed.versionId, revision: fixed.revision, checksum: fixed.contentChecksum, schemaVersion: fixed.schemaVersion };
+               delete placement.dependency; workoutVersions.set(placement.workoutId, fixed.versionId); resolvedWorkouts.set(placement.workoutId, placement.resolvedWorkout); continue;
+             }
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (!workout) throw new Error(`Missing workout reference`);
              const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
@@ -225,10 +253,22 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                  await syncManager.queueUpload(pub, 'workout', 'publication');
              }
              placement.workoutVersionId = pub.versionId;
+             placement.resolvedWorkout = { workoutGlobalId: pub.globalId, versionId: pub.versionId, revision: pub.revision, checksum: pub.contentChecksum, schemaVersion: pub.schemaVersion };
+             resolvedWorkouts.set(placement.workoutId, placement.resolvedWorkout);
+             delete placement.dependency;
              workoutVersions.set(placement.workoutId, pub.versionId);
          }
       }
+      const currentPlanEnvelope = await draftRepository.getPlanEnvelope(identity.humanUserId, plan.planId);
+      const currentDrafts = new Map((await draftRepository.listWorkoutEnvelopes(identity.humanUserId)).map(envelope => [envelope.globalId, envelope]));
+      const changedPlan = frozenPlanEnvelope && currentPlanEnvelope && frozenPlanEnvelope.revision !== currentPlanEnvelope.revision;
+      const dependencyDraftIds = new Set(frozenPlan.weeks.flatMap(week => week.placements.flatMap(item => item.dependency?.kind === 'WORKOUT_DRAFT' ? [item.dependency.workoutDraftId] : [])));
+      const changedWorkout = [...dependencyDraftIds].some(id => currentDrafts.get(id)?.revision !== freshDrafts.get(id)?.revision);
+      if (changedPlan || changedWorkout) throw new Error('CHANGED_WHILE_PREPARING');
       await recordDelivery('PUBLISHING_PLAN', { workoutVersionIds: [...workoutVersions.values()] });
+      newPlan.schemaVersion = 'humanv1.plan/1';
+      delete newPlan.dependencyKinds;
+      delete newPlan.dependencyOwnerHumanUserId;
       newPlan.destinationApplication = 'HUMAN_STRENGTH';
       newPlan.workoutVersionIds = [...workoutVersions.values()].sort();
       const planPublication = await publicationRepository.publishAuthenticated('plan', newPlan.planId, newPlan, ['PLAN']);
@@ -260,26 +300,32 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       else if (acknowledgement?.state === 'REJECTED') await recordDelivery('PARTIALLY_DELIVERED', { ...details, failureCategory: acknowledgement.reasonCode ?? 'Plan rejected' });
       else await recordDelivery('WAITING_FOR_HUMANV1', details);
     } catch (error: unknown) {
-      const diagnostic = error instanceof PublicationDiagnosticError ? error.diagnostic : transientPublicationDiagnostic(plan, error);
+      const diagnostic = error instanceof PublicationDiagnosticError ? error.diagnostic : error instanceof Error && error.message === 'CHANGED_WHILE_PREPARING'
+        ? { errorCode: 'CHANGED_WHILE_PREPARING', entityType: 'plan' as const, entityId: plan.planId, displayName: plan.title, fieldPath: 'draftRevision', validationRule: 'FROZEN_DRAFT_UNCHANGED', explanation: 'The plan or a workout changed while preparing. Review the latest draft and send again.', userCorrectableInStudio: true, sourceMigrationRequired: false, retryEligibility: 'NOT_RETRYABLE' as const }
+        : transientPublicationDiagnostic(plan, error);
       await recordDelivery('FAILED', { failureCategory: diagnostic.errorCode, diagnostic, diagnostics: error instanceof PublicationDiagnosticError ? error.diagnostics : [diagnostic] });
     }
   };
 
   const handleOpenPublish = async () => {
       const deps: Workout[] = [];
+      const changed: Workout[] = [];
+      const reused: Workout[] = [];
       for (const week of plan.weeks) {
          for (const placement of week.placements) {
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (workout) {
                  const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
                  const checksum = await publicationRepository.generateChecksum(workout);
-                 if (!pubs.some(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED')) {
-                 if (!deps.find(dependency => dependency.workoutId === workout.workoutId)) deps.push(workout);
-                 }
+                 const exact = pubs.some(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED');
+                 const target = exact ? reused : pubs.length ? changed : deps;
+                 if (!target.find(dependency => dependency.workoutId === workout.workoutId)) target.push(workout);
              }
          }
       }
       setDraftDependencies(deps);
+      setNewVersionDependencies(changed);
+      setReusedDependencies(reused);
       setIsPublishModalOpen(true);
   };
 
@@ -295,12 +341,19 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     setActiveWeekIndex(newWeekIndex);
   };
 
+  const dependencyFor = (workoutId: string) => {
+    const envelope = workoutDrafts.get(workoutId);
+    return envelope ? workoutDraftDependency(envelope) : undefined;
+  };
+
+  const withDependencyMetadata = (next: Plan): Plan => migrateLegacyPlanDraft(next, identity.humanUserId, workoutDrafts).plan;
+
   const removeCurrentWeek = () => {
     if (plan.weeks.length <= 1) return;
     const updatedWeeks = plan.weeks.filter((_, idx) => idx !== activeWeekIndex);
     // Re-number weeks
     const renumbered = updatedWeeks.map((w, idx) => ({ ...w, weekNumber: idx + 1, label: `Week ${idx + 1}` }));
-    setPlan({ ...plan, weeks: renumbered });
+    setPlan(withDependencyMetadata({ ...plan, weeks: renumbered }));
     setActiveWeekIndex(Math.max(0, activeWeekIndex - 1));
   };
 
@@ -316,7 +369,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         placementId: uuidv4(),
         dayOfWeek,
         workoutId,
-        workoutVersionId: `${workoutId}_v1`,
+        ...(dependencyFor(workoutId) ? { dependency: dependencyFor(workoutId) } : { workoutVersionId: `${workoutId}_v1` }),
         preferredMinuteOfDay: null,
         reminderEnabled: false,
         notes: ""
@@ -328,7 +381,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         placements: [...updatedWeeks[activeWeekIndex].placements, newPlacement]
       };
       
-      setPlan({ ...plan, weeks: updatedWeeks });
+      setPlan(withDependencyMetadata({ ...plan, weeks: updatedWeeks }));
     } else if (source.droppableId.startsWith("day-") && destination.droppableId.startsWith("day-")) {
       const sourceDay = parseInt(source.droppableId.replace("day-", ""));
       const destDay = parseInt(destination.droppableId.replace("day-", ""));
@@ -356,7 +409,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       ...updatedWeeks[activeWeekIndex],
       placements: updatedWeeks[activeWeekIndex].placements.filter(p => p.placementId !== placementId)
     };
-    setPlan({ ...plan, weeks: updatedWeeks });
+    setPlan(withDependencyMetadata({ ...plan, weeks: updatedWeeks }));
   };
   
   const addWorkoutToDay = (workoutId: string, dayOfWeek: number) => {
@@ -364,7 +417,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       placementId: uuidv4(),
       dayOfWeek,
       workoutId,
-      workoutVersionId: `${workoutId}_v1`,
+      ...(dependencyFor(workoutId) ? { dependency: dependencyFor(workoutId) } : { workoutVersionId: `${workoutId}_v1` }),
       preferredMinuteOfDay: null,
       reminderEnabled: false,
       notes: ""
@@ -374,7 +427,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       ...updatedWeeks[activeWeekIndex],
       placements: [...updatedWeeks[activeWeekIndex].placements, newPlacement]
     };
-    setPlan({ ...plan, weeks: updatedWeeks });
+    setPlan(withDependencyMetadata({ ...plan, weeks: updatedWeeks }));
   };
 
   return (
@@ -405,7 +458,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
           </button>
-          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} aria-describedby={publicationReason ? "plan-publication-reason" : undefined} title={validationErrors.length ? validationErrors[0].message : undefined} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} aria-describedby={publicationReason ? "plan-publication-reason" : undefined} title={validationErrors[0]?.message ?? dependencyIssues[0]?.message} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
             <Send className="w-4 h-4" /> Send plan to my apps
           </button>
       {isPublishModalOpen && (
@@ -417,7 +470,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
               <p><span className="font-semibold text-hv-text">Placements:</span> {plan.weeks.reduce((acc, w) => acc + w.placements.length, 0)}</p>
               {draftDependencies.length > 0 && (
                   <div className="mt-4">
-                      <p className="font-semibold text-hv-text">Workouts that will be published automatically:</p>
+                      <p className="font-semibold text-hv-text">Workouts published for the first time:</p>
                       <ul className="list-disc pl-5">
                           {draftDependencies.map(d => <li key={d.workoutId}>{d.title}</li>)}
                       </ul>
@@ -438,6 +491,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
               ) : (
                 <button onClick={handlePublish} disabled={deliveryAttempt?.phase === 'VALIDATING' || deliveryAttempt?.phase === 'PUBLISHING_WORKOUTS' || deliveryAttempt?.phase === 'PUBLISHING_PLAN' || deliveryAttempt?.phase === 'SENDING' || deliveryAttempt?.diagnostic?.retryEligibility === 'NOT_RETRYABLE'} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">{deliveryAttempt?.phase === 'FAILED' ? 'Retry' : 'Send'}</button>
               )}
+              {newVersionDependencies.length > 0 && <div><p className="font-semibold text-hv-text">Workouts that will create a new fixed version:</p><ul className="list-disc pl-5">{newVersionDependencies.map(item => <li key={item.workoutId}>{item.title}</li>)}</ul></div>}
+              {reusedDependencies.length > 0 && <div><p className="font-semibold text-hv-text">Existing fixed versions reused:</p><ul className="list-disc pl-5">{reusedDependencies.map(item => <li key={item.workoutId}>{item.title}</li>)}</ul></div>}
+              <p>Your editable drafts remain available. Sending creates fixed versions for reliable device delivery.</p>
             </div>
             {deliveryAttempt && (
               <details className="mt-4 text-xs text-hv-text-muted">
@@ -458,6 +514,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       )}
         </div>
       </div>
+      {dependencyIssues.length > 0 && <section role="alert" className="mx-4 md:mx-8 mt-4 rounded-lg border border-hv-error p-4"><h2 className="font-semibold">Needs attention</h2><ul className="mt-2 list-disc pl-5">{dependencyIssues.map(issue => <li key={issue.placementId}>{issue.message}</li>)}</ul></section>}
       <PlanReconstructionStatus plan={plan} />
       {deliveryAttempt && (
         <section className="mx-4 md:mx-8 mt-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4" aria-live="polite" aria-label="Plan delivery status">
@@ -544,6 +601,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                                   >
                                     <div className="font-semibold mb-1 line-clamp-1 pr-6">{workout?.title || "Workout unavailable"}</div>
                                     <div className="text-xs text-hv-text-muted">{workout?.discipline || "Reconstructed placement"}</div>
+                                    {p.dependency?.kind === 'WORKOUT_DRAFT' && <div className="mt-1 text-xs text-hv-primary">{dependencyHasUnpublishedChanges(p.dependency, workoutDrafts) ? 'Workout has unpublished changes' : 'Draft'}</div>}
                                     <PlacementReconstructionStatus placement={p} weekLabel={plan.weeks[activeWeekIndex].label} dayLabel={format(day, 'EEEE')} workout={workout} diagnostics={plan.reconstructionDiagnostics ?? []} />
                                     <button 
                                       onClick={() => removePlacement(p.placementId)}

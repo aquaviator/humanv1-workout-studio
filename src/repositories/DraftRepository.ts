@@ -118,6 +118,10 @@ export class DraftRepository {
     return draft.payload;
   }
 
+  async getPlanEnvelope(userId: string, planId: string): Promise<DraftEnvelope<Plan> | null> {
+    return (await get<DraftEnvelope<Plan>>(this.getStoreKey(userId, 'plan', planId))) ?? null;
+  }
+
   async listPlanDrafts(userId: string): Promise<Plan[]> {
     const allKeys = await keys();
     const planKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(`drafts_${userId}_plan_`));

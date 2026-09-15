@@ -31,8 +31,8 @@ export function validatePlan(plan: Plan): PlanValidationError[] {
       if (!p.workoutId) {
         errors.push({ placementId: p.placementId, message: "Placement is missing a workout reference." });
       }
-      if (!p.workoutVersionId) {
-        errors.push({ placementId: p.placementId, message: "Placement is missing an immutable workout version reference." });
+      if (!p.workoutVersionId && !p.dependency) {
+        errors.push({ placementId: p.placementId, message: "Placement is missing a workout dependency." });
       }
 
       if (p.dayOfWeek < 1 || p.dayOfWeek > 7) {

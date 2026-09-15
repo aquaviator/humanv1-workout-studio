@@ -120,13 +120,21 @@ export interface PlanPlacement {
   placementId: StableId;
   dayOfWeek: number;
   workoutId: StableId;
-  workoutVersionId: StableId;
+  /** Immutable versions are populated only for published/governed dependencies. */
+  workoutVersionId?: StableId;
+  dependency?: PlanDraftDependency;
+  resolvedWorkout?: { workoutGlobalId: StableId; versionId: StableId; revision: number; checksum: string; schemaVersion: string };
   preferredMinuteOfDay: number | null;
   reminderEnabled: boolean;
   notes: string;
   /** Original Android schedule evidence. Optional for Studio-authored plans. */
   scheduledEpochDay?: number;
 }
+
+export type PlanDraftDependency =
+  | { kind: "WORKOUT_DRAFT"; workoutDraftId: StableId; humanUserId: StableId; expectedRevision: number; expectedUpdatedAt?: string; displayName: string; originApplication: "WORKOUT_STUDIO"; previouslyResolvedVersionId?: StableId }
+  | { kind: "PUBLISHED_WORKOUT_VERSION"; workoutGlobalId: StableId; versionId: StableId; revision: number; checksum: string; schemaVersion: "humanv1.canonical-workout/1"; displayName: string }
+  | { kind: "GOVERNED_TEMPLATE"; templateId: StableId; immutableVersionId: StableId; displayName: string; provenance: "RESEARCH_CANDIDATE" | "GOVERNED_LIBRARY" };
 
 export interface PlanWeek {
   weekId: StableId;
@@ -148,4 +156,6 @@ export interface Plan {
   weeks: PlanWeek[];
   notes?: string;
   reconstructionDiagnostics?: ReconstructionDiagnostic[];
+  dependencyOwnerHumanUserId?: StableId;
+  dependencyKinds?: Array<PlanDraftDependency["kind"]>;
 }

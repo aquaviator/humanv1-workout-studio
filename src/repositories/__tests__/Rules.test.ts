@@ -55,6 +55,14 @@ beforeEach(async () => {
 });
 
 describe('Firestore Security Rules', () => {
+  it('accepts owner-bound Studio plan draft dependencies and rejects cross-owner or unknown kinds', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const value = draft('human_1', 'plan-draft-1', 1);
+    const validPayload = { schemaVersion: 'humanv1.studio-plan-draft/1', dependencyOwnerHumanUserId: 'human_1', dependencyKinds: ['WORKOUT_DRAFT'], weeks: [] };
+    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...value, payload: validPayload }));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-cross'), { ...draft('human_1', 'plan-draft-cross', 1), payload: { ...validPayload, dependencyOwnerHumanUserId: 'human_2' } }));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-kind'), { ...draft('human_1', 'plan-draft-kind', 1), payload: { ...validPayload, dependencyKinds: ['UNTRUSTED'] } }));
+  });
   it('allows only owner read of current and denies all client entitlement mutations', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const bob = testEnv.authenticatedContext('auth_2').firestore();

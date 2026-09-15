@@ -18,7 +18,8 @@ export function validateWorkout(workout: Workout, catalogue: Exercise[]): Valida
     errors.push({ fieldPath: "title", rule: "WORKOUT_TITLE_REQUIRED", message: "Workout is missing a title." });
   }
 
-  if (workout.blocks.length === 0) {
+  const blocks = Array.isArray(workout.blocks) ? workout.blocks : [];
+  if (blocks.length === 0) {
     errors.push({ fieldPath: "blocks", rule: "WORKOUT_REQUIRES_EXECUTABLE_BLOCK", message: "Workout has no executable exercise blocks." });
   }
 
@@ -30,26 +31,28 @@ export function validateWorkout(workout: Workout, catalogue: Exercise[]): Valida
     seenIds.add(id);
   };
 
-  workout.blocks.forEach((block) => {
+  blocks.forEach((block) => {
     checkId(block.blockId, block.type);
 
     if (block.type === "SUPERSET") {
-      if (block.exercises.length === 0) {
+      const exercises = Array.isArray(block.exercises) ? block.exercises : [];
+      if (exercises.length === 0) {
         errors.push({ blockId: block.blockId, message: "Superset is empty." });
-      } else if (block.exercises.length < 2) {
+      } else if (exercises.length < 2) {
         errors.push({ blockId: block.blockId, message: "Superset must contain at least two exercises." });
       }
-      block.exercises.forEach(ex => checkExerciseBlock(ex, block.blockId, errors, catalogue, checkId));
+      exercises.forEach(ex => checkExerciseBlock(ex, block.blockId, errors, catalogue, checkId));
     } else if (block.type === "CIRCUIT") {
-      if (block.exercises.length === 0) {
+      const exercises = Array.isArray(block.exercises) ? block.exercises : [];
+      if (exercises.length === 0) {
         errors.push({ blockId: block.blockId, message: "Circuit is empty." });
-      } else if (block.exercises.length < 2) {
+      } else if (exercises.length < 2) {
         errors.push({ blockId: block.blockId, message: "Circuit must contain at least two exercises." });
       }
       if (block.rounds <= 0) {
         errors.push({ blockId: block.blockId, message: "Circuit rounds must be greater than 0." });
       }
-      block.exercises.forEach(ex => checkExerciseBlock(ex, block.blockId, errors, catalogue, checkId));
+      exercises.forEach(ex => checkExerciseBlock(ex, block.blockId, errors, catalogue, checkId));
     } else if (block.type === "EXERCISE") {
       checkExerciseBlock(block, block.blockId, errors, catalogue, checkId);
     } else if (block.type === "REST") {
@@ -76,9 +79,11 @@ function checkExerciseBlock(
   const supportedMetrics = exerciseDef ? [...exerciseDef.metricProfile.primary, ...exerciseDef.metricProfile.secondary, ...exerciseDef.metricProfile.optional] : [];
   const unsupportedMetrics = exerciseDef ? exerciseDef.metricProfile.unsupported : [];
 
-  block.efforts.forEach(effort => {
+  const efforts = Array.isArray(block.efforts) ? block.efforts : [];
+  efforts.forEach(effort => {
     checkId(effort.effortId, "EFFORT");
-    effort.prescriptions.forEach(p => {
+    const prescriptions = Array.isArray(effort.prescriptions) ? effort.prescriptions : [];
+    prescriptions.forEach(p => {
       checkId(p.prescriptionId, "PRESCRIPTION");
       
       if (p.targetValue !== undefined && p.targetValue < 0) {
@@ -112,15 +117,17 @@ function checkExerciseBlock(
 /** Strict delivery contract; draft editing may temporarily contain incomplete rows. */
 export function validateWorkoutForPublication(workout: Workout, catalogue: Exercise[]): ValidationError[] {
   const errors = validateWorkout(workout, catalogue);
-  const exerciseBlocks = workout.blocks.flatMap(block =>
+  const blocks = Array.isArray(workout.blocks) ? workout.blocks : [];
+  const exerciseBlocks = blocks.flatMap(block =>
     block.type === "EXERCISE" ? [{ block, parentId: block.blockId }] : block.type === "SUPERSET" || block.type === "CIRCUIT"
-      ? block.exercises.map(child => ({ block: child, parentId: block.blockId })) : []
+      ? (Array.isArray(block.exercises) ? block.exercises : []).map(child => ({ block: child, parentId: block.blockId })) : []
   );
-  if (workout.blocks.length > 0 && exerciseBlocks.length === 0) errors.push({ fieldPath: "blocks", rule: "WORKOUT_REQUIRES_EXECUTABLE_BLOCK", message: "Workout has no executable exercise blocks." });
+  if (blocks.length > 0 && exerciseBlocks.length === 0) errors.push({ fieldPath: "blocks", rule: "WORKOUT_REQUIRES_EXECUTABLE_BLOCK", message: "Workout has no executable exercise blocks." });
   for (const { block, parentId } of exerciseBlocks) {
     if (!block.exerciseId?.trim()) errors.push({ blockId: parentId, fieldPath: `blocks[${parentId}].exerciseId`, rule: "EXERCISE_REFERENCE_REQUIRED", message: "Exercise block is missing an executable exercise reference." });
-    if (block.efforts.length === 0) errors.push({ blockId: parentId, fieldPath: `blocks[${parentId}].efforts`, rule: "SET_CONTENT_REQUIRED", message: "Exercise block has no set content." });
-    for (const effort of block.efforts) if (effort.prescriptions.length === 0) errors.push({ blockId: parentId, effortId: effort.effortId, fieldPath: `blocks[${parentId}].efforts[${effort.effortId}].prescriptions`, rule: "SET_CONTENT_REQUIRED", message: "Set has no executable prescription." });
+    const efforts = Array.isArray(block.efforts) ? block.efforts : [];
+    if (efforts.length === 0) errors.push({ blockId: parentId, fieldPath: `blocks[${parentId}].efforts`, rule: "SET_CONTENT_REQUIRED", message: "Exercise block has no set content." });
+    for (const effort of efforts) if (!Array.isArray(effort.prescriptions) || effort.prescriptions.length === 0) errors.push({ blockId: parentId, effortId: effort.effortId, fieldPath: `blocks[${parentId}].efforts[${effort.effortId}].prescriptions`, rule: "SET_CONTENT_REQUIRED", message: "Set has no executable prescription." });
   }
   return errors;
 }

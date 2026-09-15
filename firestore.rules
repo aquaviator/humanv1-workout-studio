@@ -115,6 +115,14 @@ service cloud.firestore {
       return validPublishedVersion(humanUserId, versionId, "plan")
         && request.resource.data.payload.weeks is list;
     }
+    function validPlanDraftDependencies(humanUserId) {
+      let payload = request.resource.data.payload;
+      return payload.schemaVersion != "humanv1.studio-plan-draft/1" || (
+        payload.dependencyOwnerHumanUserId == humanUserId
+        && payload.dependencyKinds is list
+        && payload.dependencyKinds.hasOnly(["WORKOUT_DRAFT", "PUBLISHED_WORKOUT_VERSION", "GOVERNED_TEMPLATE"])
+      );
+    }
     function createsOwnedVersionedRecord(humanUserId, documentId) {
       return ownsHumanRoot(humanUserId)
         && request.resource.data.humanUserId == humanUserId
@@ -325,8 +333,8 @@ service cloud.firestore {
       }
       match /planDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document);
-        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document);
+        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document) && validPlanDraftDependencies(humanUserId);
+        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document) && validPlanDraftDependencies(humanUserId);
         allow delete: if false;
       }
       match /protocolDrafts/{document} {
