@@ -1,6 +1,7 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { Workout, Plan, Protocol } from '../domain/types';
 import { syncManager } from './SyncManager';
+import { assertMutationAllowed } from '../config/mutationPolicy';
 
 export interface DraftEnvelope<T> {
   schemaVersion: number;
@@ -22,6 +23,7 @@ export class DraftRepository {
 
   // --- WORKOUTS ---
   async saveWorkoutDraft(userId: string, workout: Workout): Promise<void> {
+    assertMutationAllowed('saveWorkoutDraft');
     const key = this.getStoreKey(userId, 'workout', workout.workoutId);
     let currentDraft = await get<DraftEnvelope<Workout>>(key);
     const now = new Date().toISOString();
@@ -62,6 +64,7 @@ export class DraftRepository {
   }
 
   async deleteWorkoutDraft(userId: string, workoutId: string): Promise<void> {
+    assertMutationAllowed('deleteWorkoutDraft');
     const key = this.getStoreKey(userId, 'workout', workoutId);
     const draft = await get<DraftEnvelope<Workout>>(key);
     if (draft) {
@@ -88,6 +91,7 @@ export class DraftRepository {
 
   // --- PLANS ---
   async savePlanDraft(userId: string, plan: Plan): Promise<void> {
+    assertMutationAllowed('savePlanDraft');
     const key = this.getStoreKey(userId, 'plan', plan.planId);
     let currentDraft = await get<DraftEnvelope<Plan>>(key);
     const now = new Date().toISOString();
@@ -128,6 +132,7 @@ export class DraftRepository {
   }
   
   async deletePlanDraft(userId: string, planId: string): Promise<void> {
+    assertMutationAllowed('deletePlanDraft');
     const key = this.getStoreKey(userId, 'plan', planId);
     const draft = await get<DraftEnvelope<Plan>>(key);
     if (draft) {
@@ -141,6 +146,7 @@ export class DraftRepository {
 
   // --- PROTOCOLS ---
   async saveProtocolDraft(userId: string, protocol: Protocol): Promise<void> {
+    assertMutationAllowed('saveProtocolDraft');
     const key = this.getStoreKey(userId, 'protocol', protocol.protocolId);
     let currentDraft = await get<DraftEnvelope<Protocol>>(key);
     const now = new Date().toISOString();
@@ -181,6 +187,7 @@ export class DraftRepository {
   }
   
   async deleteProtocolDraft(userId: string, protocolId: string): Promise<void> {
+    assertMutationAllowed('deleteProtocolDraft');
     const key = this.getStoreKey(userId, 'protocol', protocolId);
     const draft = await get<DraftEnvelope<Protocol>>(key);
     if (draft) {

@@ -4,6 +4,7 @@ import { db } from "../config/firebase";
 import { Exercise, PrivateExercise } from "../domain/catalogue";
 import { Effort, Plan, PlanPlacement, Workout } from "../domain/types";
 import { dedupeDiagnostics, ReconstructionDiagnostic, referenceDiagnostic } from "../domain/presentation";
+import { assertMutationAllowed } from "../config/mutationPolicy";
 
 type CloudDoc = Record<string, unknown>;
 type Reader = (owner: string, collectionName: string) => Promise<CloudDoc[]>;
@@ -65,6 +66,7 @@ export class CrossAppRepository {
   constructor(private read: Reader = defaultRead, private write: Writer = defaultWrite, private online = () => navigator.onLine) {}
 
   private async durableWrite(owner: string, collectionName: string, id: string, value: CloudDoc, base: CloudDoc = {}): Promise<boolean> {
+    assertMutationAllowed(`crossAppWrite:${collectionName}`);
     const pending: PendingWrite = { owner, collectionName, id, value, base };
     await set(pendingKey(owner, collectionName, id), pending);
     if (!this.online()) return false;
@@ -79,6 +81,7 @@ export class CrossAppRepository {
   }
 
   private async durablePlanProjection(owner: string, writes: ProjectionWrite[]): Promise<boolean> {
+    assertMutationAllowed('crossAppPlanProjection');
     for (const item of writes) await set(pendingKey(owner, item.collectionName, item.id), { owner, ...item } satisfies PendingWrite);
     if (!this.online()) return false;
     if (this.write !== defaultWrite) {
@@ -102,6 +105,7 @@ export class CrossAppRepository {
   }
 
   async replayPending(owner: string): Promise<number> {
+    assertMutationAllowed('crossAppReplayPending');
     if (!this.online()) return 0;
     let applied = 0;
     const prefix = `crossapp_pending_${owner}_`;
@@ -126,6 +130,7 @@ export class CrossAppRepository {
   }
 
   async resolveConflict(conflict: CrossAppConflict, strategy: "KEEP_STUDIO" | "KEEP_APP" | "MERGE"): Promise<void> {
+    assertMutationAllowed('crossAppResolveConflict');
     const key = conflictKey(conflict.owner, conflict.collectionName, conflict.id);
     const stored = await get<CrossAppConflict>(key);
     if (stored?.resolvedRevision) return;

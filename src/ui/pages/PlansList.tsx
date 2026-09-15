@@ -7,10 +7,12 @@ import { crossAppRepository } from "../../repositories/CrossAppRepository";
 import ReconstructionDiagnostics from "../components/ReconstructionDiagnostics";
 import { TriathlonResearchLibrary } from "../components/TriathlonResearchLibrary";
 import { cloneResearchPlanToDraft } from "../../fixtures/triathlonResearchFixtures";
+import { isReadOnlyAcceptanceMode } from "../../config/mutationPolicy";
 
 export default function PlansList({ identity }: { identity: HumanIdentity }) {
   const navigate = useNavigate();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const readOnlyAcceptance = isReadOnlyAcceptanceMode();
   useEffect(() => {
     Promise.all([draftRepository.listPlanDrafts(identity.humanUserId), crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])]).then(([local, app]) => setPlans([...local, ...app.filter(remote => !local.some(item => item.planId === remote.planId))]));
   }, [identity.humanUserId]);
@@ -19,9 +21,9 @@ export default function PlansList({ identity }: { identity: HumanIdentity }) {
     <div className="p-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Plans</h1>
-        <Link to="/plans/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
+        {!readOnlyAcceptance && <Link to="/plans/new" className="bg-hv-primary text-white px-4 py-2 rounded-md hover:bg-hv-primary-hover font-medium">
           Create Plan
-        </Link>
+        </Link>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {plans.map(plan => (
@@ -37,7 +39,8 @@ export default function PlansList({ identity }: { identity: HumanIdentity }) {
           </article>
         ))}
       </div>
-      <TriathlonResearchLibrary onClone={async source => { const draft = cloneResearchPlanToDraft(source, identity.humanUserId); await draftRepository.savePlanDraft(identity.humanUserId, draft); navigate(`/plans/${draft.planId}`); }} />
+      {readOnlyAcceptance && <p className="mt-10 rounded border border-hv-border p-4 text-sm text-hv-text-muted">Read-only acceptance mode: creation and publication controls are unavailable.</p>}
+      <TriathlonResearchLibrary mutationDisabled={readOnlyAcceptance} onClone={async source => { const draft = cloneResearchPlanToDraft(source, identity.humanUserId); const existing = await draftRepository.getPlanDraft(identity.humanUserId, draft.planId); if (!existing) await draftRepository.savePlanDraft(identity.humanUserId, draft); navigate(`/plans/${draft.planId}`); }} />
     </div>
   );
 }

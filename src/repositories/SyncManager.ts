@@ -4,6 +4,7 @@ import { PublishedEnvelope } from '../domain/publication';
 import { PublishableContent } from '../domain/publication';
 import { db } from '../config/firebase';
 import { doc, runTransaction, collection, query, getDocs, getDoc } from 'firebase/firestore';
+import { assertMutationAllowed, isReadOnlyAcceptanceMode } from '../config/mutationPolicy';
 
 export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED' | 'NEEDS_USER_REVIEW';
 export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
@@ -55,6 +56,7 @@ export class SyncManager {
   }
 
   async queueUpload(envelope: DraftEnvelope<PublishableContent> | PublishedEnvelope<PublishableContent>, type: 'workout' | 'plan' | 'protocol', syncType: 'draft' | 'publication' = 'draft'): Promise<void> {
+    assertMutationAllowed(`queueUpload:${syncType}:${type}`);
     const key = syncType === 'publication' 
       ? `sync_pub_${envelope.humanUserId}_${type}_${(envelope as PublishedEnvelope<PublishableContent>).versionId}`
       : `sync_${envelope.humanUserId}_${type}_${envelope.globalId}`;
@@ -74,6 +76,7 @@ export class SyncManager {
   }
 
   async syncPending(): Promise<void> {
+    if (isReadOnlyAcceptanceMode()) return;
     if (!this.isOnline) return;
     if (this.syncInFlight) {
       this.syncRequested = true;
@@ -159,6 +162,7 @@ export class SyncManager {
   }
 
   private async uploadRecord(key: string, record: SyncRecord) {
+    assertMutationAllowed(`uploadRecord:${record.syncType ?? 'draft'}:${record.type}`);
     const { envelope, type } = record;
     const isPub = record.syncType === 'publication';
     const collectionName = isPub ? `published${type.charAt(0).toUpperCase() + type.slice(1)}s` : `${type}Drafts`;

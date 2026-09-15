@@ -50,6 +50,12 @@ async function planPublications(planId?: string) {
   } finally { await deleteApp(app); }
 }
 
+async function planDraftIds() {
+  const { app, db } = await adminDb();
+  try { return (await db.collection(`users/${owner}/planDrafts`).get()).docs.map(item => item.id).sort(); }
+  finally { await deleteApp(app); }
+}
+
 async function seedPlanDependencyDraft() {
   const { app, db } = await adminDb();
   try {
@@ -250,5 +256,37 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(async () => (await planPublications()).length).toBe(1);
     await expect(page.getByText(/Available in Human Strength/i)).toHaveCount(0);
+  });
+
+  test('keeps passive acceptance read-only and creates an explicitly confirmed research copy once', async () => {
+    const before = await planDraftIds();
+    await page.goto('/plans?acceptance=read-only');
+    await expect(page.getByText(/Read-only acceptance mode/)).toBeVisible();
+    for (const name of ['First Half Ironman', 'Intermediate Half Ironman', 'First Ironman', 'Intermediate Ironman']) {
+      await page.getByRole('tab', { name }).click();
+      const details = page.getByText('Evidence and limitations');
+      if (!(await details.evaluate(node => (node.parentElement as HTMLDetailsElement).open))) await details.click();
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await seriousAxeViolations(page)).toEqual([]);
+    await expect(page.getByTestId(/create-research-copy/)).toHaveCount(0);
+    expect(await planDraftIds()).toEqual(before);
+
+    // This is an isolated emulator journey explicitly switching back to normal
+    // user mode; production acceptance never clears this tab-scoped boundary.
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto('/plans');
+    await page.getByRole('tab', { name: 'Intermediate Ironman' }).click();
+    await page.getByTestId('create-research-copy-intermediate-ironman-16-week').click();
+    await expect(page.getByText(/creates new cloud data/i)).toBeVisible();
+    await page.getByRole('button', { name: 'Create cloud copy of Intermediate Ironman' }).click();
+    const expectedCopyId = 'research_copy_4b9b6a3adb81e4eb7443';
+    await expect(page).toHaveURL(new RegExp(expectedCopyId));
+    await expect.poll(async () => (await planDraftIds()).filter(id => id === expectedCopyId).length).toBe(1);
+    await page.goto('/plans');
+    await page.getByRole('tab', { name: 'Intermediate Ironman' }).click();
+    await page.getByTestId('create-research-copy-intermediate-ironman-16-week').click();
+    await page.getByRole('button', { name: 'Create cloud copy of Intermediate Ironman' }).click();
+    expect((await planDraftIds()).filter(id => id === expectedCopyId)).toHaveLength(1);
   });
 });
