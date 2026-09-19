@@ -64,7 +64,7 @@ describe('Emulator Acceptance', () => {
     await clear();
     const published = await publicationRepository.publish('human_1', 'workout', 'workout_cloud_session',
       validWorkout('workout_cloud_session', 'Cloud Session Workout'));
-    await syncManager.syncPending();
+    await adminDb.collection('users').doc('human_1').collection('publishedWorkouts').doc(published.versionId).set(published);
     await adminDb.collection('users').doc('human_1').collection('workoutDeliveryAcks').doc('wrong-version').set({
       schemaVersion: 1, acknowledgementId: 'wrong-version', humanUserId: 'human_1', workoutGlobalId: published.globalId,
       versionId: `${published.globalId}_r0_wrong`, applicationId: 'HUMAN_STRENGTH', appliedChecksum: published.contentChecksum,
@@ -95,7 +95,7 @@ describe('Emulator Acceptance', () => {
     await expect(getDocs(collection(db, 'users', 'human_1', 'publishedWorkouts'))).rejects.toMatchObject({ code: 'permission-denied' });
     await expect(getDocs(collection(db, 'users', 'human_1', 'workoutDeliveryAcks'))).rejects.toMatchObject({ code: 'permission-denied' });
   });
-  it('Publication: unchanged republish idempotence and edited republish creates one new version', async () => {
+  it('Publication: local immutable construction remains deterministic but direct client publication is denied', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     
@@ -105,10 +105,9 @@ describe('Emulator Acceptance', () => {
     const pub1 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
     await syncManager.syncPending();
     
-    // Read from remote
+    // The governed boundary rejects the legacy browser upload.
     const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub1.versionId));
-    expect(remote.exists()).toBe(true);
-    expect(remote.data()?.payload.title).toBe("My Pub Workout");
+    expect(remote.exists()).toBe(false);
     
     // Publish same unchanged
     const pub2 = await publicationRepository.publish('human_1', 'workout', workoutPayload.workoutId, workoutPayload, ['STRENGTH']);
@@ -121,12 +120,7 @@ describe('Emulator Acceptance', () => {
     expect(pub3.revision).toBe(2);
     await syncManager.syncPending();
     
-    const remote3 = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub3.versionId));
-    expect(remote3.data()?.payload.title).toBe("My Edited Pub Workout");
-    
-    // Check old version is immutable and remains
-    const remoteOld = await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub1.versionId));
-    expect(remoteOld.data()?.payload.title).toBe("My Pub Workout");
+    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', pub3.versionId))).exists()).toBe(false);
   });
 
   it('Publication: Protocol compiled timeline round-trips', async () => {
@@ -165,7 +159,7 @@ describe('Emulator Acceptance', () => {
     expect(remote.data()?.compiledTimeline[1].startTime).toBe(30);
   });
   
-  it('Publication: Plan references exact published Workout versions', async () => {
+  it('Publication: direct client Plan publication is denied even with an exact Workout version reference', async () => {
      // A Plan placement requires workoutVersionId
      await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
      const dependency = await publicationRepository.publish('human_1', 'workout', 'workout_plan_dependency', validWorkout('workout_plan_dependency', 'Plan Workout'));
@@ -194,8 +188,7 @@ describe('Emulator Acceptance', () => {
      await syncManager.syncPending();
      
      const remote = await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', pub.versionId));
-     expect(remote.exists()).toBe(true);
-     expect(remote.data()?.payload.weeks[0].placements[0].workoutVersionId).toBe(dependency.versionId);
+     expect(remote.exists()).toBe(false);
   });
   
   it('Publication: Cross-owner writes are denied', async () => {
@@ -238,7 +231,7 @@ describe('Emulator Acceptance', () => {
     expect((await new FirebaseEntitlementRepository().getEntitlement('human_2')).state).toBe('VERIFICATION_UNAVAILABLE');
   });
 
-  it('interrupted offline publication replay makes dependencies durable before the plan', async () => {
+  it('legacy interrupted browser publication replay cannot cross the governed boundary', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     const workout = validWorkout('ordered-dependency', 'Ordered dependency');
@@ -267,19 +260,19 @@ describe('Emulator Acceptance', () => {
     window.__HV1_TEST_PAUSE_PUBLICATION_SEND__ = async () => {
       attempts++;
       if (attempts === 2) {
-        expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(true);
+        expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(false);
         expect((await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', planVersionId))).exists()).toBe(false);
       }
     };
     await syncManager.syncPending();
     delete window.__HV1_TEST_PAUSE_PUBLICATION_SEND__;
-    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(true);
-    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', planVersionId))).exists()).toBe(true);
+    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedWorkouts', workoutVersionId))).exists()).toBe(false);
+    expect((await getDoc(doc(db, 'users', 'human_1', 'publishedPlans', planVersionId))).exists()).toBe(false);
     await syncManager.syncPending();
-    expect((await getDocs(collection(db, 'users', 'human_1', 'publishedPlans'))).docs.filter(item => item.id === planVersionId)).toHaveLength(1);
+    expect((await getDocs(collection(db, 'users', 'human_1', 'publishedPlans'))).docs.filter(item => item.id === planVersionId)).toHaveLength(0);
   });
 
-  it('serialized two-week plan projection and exact HumanV1 acknowledgement journey', async () => {
+  it('legacy acknowledgement writes are denied while shared planner records retain owner-scoped compatibility', async () => {
     await signInWithEmailAndPassword(auth, 'user1@example.com', 'password123');
     await clear();
     const workoutA = await publicationRepository.publish('human_1', 'workout', 'journey-workout-a', validWorkout('journey-workout-a', 'Strength A'));
@@ -294,22 +287,17 @@ describe('Emulator Acceptance', () => {
       ] };
     const planPublication = await publicationRepository.publish('human_1', 'plan', plan.planId, plan);
     await syncManager.syncPending();
-    const projection = await crossAppRepository.deliverPublishedPlan('human_1', plan, { planVersionId: planPublication.versionId,
-      planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision,
-      workoutVersionIds: plan.workoutVersionIds!, destinationApplication: 'HUMAN_STRENGTH' });
-    expect(projection).toEqual({ queued: false, occurrences: 3 });
-    expect((await getDocs(collection(db, 'users', 'human_1', 'plannedWorkouts'))).docs.filter(item => item.id.startsWith('journey-plan:'))).toHaveLength(3);
-    const ackId = 'strength-plan-journey';
-    await setDoc(doc(db, 'users', 'human_1', 'planDeliveryAcks', ackId), { schemaVersion: 1, acknowledgementId: ackId,
-      humanUserId: 'human_1', planGlobalId: plan.planId, planVersionId: planPublication.versionId,
-      planChecksum: planPublication.contentChecksum, applicationId: 'HUMAN_STRENGTH', sourceRevision: planPublication.revision,
-      workoutVersionIds: plan.workoutVersionIds, state: 'APPLIED', reasonCode: null, clientAppliedAtMillis: Date.now(), createdAt: serverTimestamp() });
-    await expect(deliveryAcknowledgementRepository.findExactPlan('human_1', { planGlobalId: plan.planId,
-      planVersionId: planPublication.versionId, planChecksum: planPublication.contentChecksum,
-      sourceRevision: planPublication.revision, workoutVersionIds: plan.workoutVersionIds! })).resolves.toMatchObject({ state: 'APPLIED' });
     await expect(crossAppRepository.deliverPublishedPlan('human_1', plan, { planVersionId: planPublication.versionId,
       planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision,
-      workoutVersionIds: plan.workoutVersionIds!, destinationApplication: 'HUMAN_STRENGTH' })).resolves.toEqual({ queued: false, occurrences: 3 });
+      workoutVersionIds: plan.workoutVersionIds!, destinationApplication: 'HUMAN_STRENGTH' }))
+      .resolves.toEqual({ queued: false, occurrences: 3 });
+    expect((await getDocs(collection(db, 'users', 'human_1', 'plannedWorkouts'))).docs.filter(item => item.id.startsWith('journey-plan:'))).toHaveLength(3);
+    const ackId = 'strength-plan-journey';
+    await expect(setDoc(doc(db, 'users', 'human_1', 'planDeliveryAcks', ackId), { schemaVersion: 1, acknowledgementId: ackId,
+      humanUserId: 'human_1', planGlobalId: plan.planId, planVersionId: planPublication.versionId,
+      planChecksum: planPublication.contentChecksum, applicationId: 'HUMAN_STRENGTH', sourceRevision: planPublication.revision,
+      workoutVersionIds: plan.workoutVersionIds, state: 'APPLIED', reasonCode: null, clientAppliedAtMillis: Date.now(), createdAt: serverTimestamp() }))
+      .rejects.toMatchObject({ code: 'permission-denied' });
   });
 
   it('Workout round trip, Conflict isolation, Offline creation', async () => {

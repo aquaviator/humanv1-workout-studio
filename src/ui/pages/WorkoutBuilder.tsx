@@ -15,6 +15,7 @@ import { HumanIdentity } from "../../domain/identity";
 import { validateWorkout } from "../../domain/validation/workoutValidation";
 import { AthletePreview } from "../components/AthletePreview";
 import { publicationRepository } from "../../repositories/PublicationRepository";
+import { governedPublicationRepository } from "../../repositories/GovernedPublicationRepository";
 import { Send } from "lucide-react";
 import { deliveryAcknowledgementRepository, DeliveryAcknowledgement } from "../../repositories/DeliveryAcknowledgementRepository";
 import { crossAppRepository, markCatalogueSource } from "../../repositories/CrossAppRepository";
@@ -140,8 +141,12 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       if (validationErrors.length) return;
       setTransientPhase('PREPARING');
       setNotice({ key: `preparing-${workout.workoutId}`, message: 'Preparing version…' });
-      const envelope = await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
-      setNotice({ key: `queued-${envelope.versionId}`, message: navigator.onLine ? 'Saved and queued' : 'Queued — will send when connected' });
+      await draftRepository.saveWorkoutDraft(identity.humanUserId, workout);
+      await syncManager.syncPending();
+      const draft = (await draftRepository.listWorkoutEnvelopes(identity.humanUserId)).find(item => item.globalId === workout.workoutId);
+      if (!draft) throw new Error('WORKOUT_DRAFT_NOT_FOUND');
+      const envelope = await governedPublicationRepository.publishWorkout(workout.workoutId, draft.revision);
+      setNotice({ key: `queued-${envelope.versionId}`, message: 'Saved and queued' });
     } catch (error: unknown) {
       console.warn("Failed to publish", error instanceof Error ? error.message : 'Publication failed');
       setNotice({ key: `failed-${workout.workoutId}`, message: 'Workout could not be queued. Your draft is safe.' });

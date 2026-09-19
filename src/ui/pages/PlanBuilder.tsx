@@ -23,6 +23,7 @@ import { deliveryAcknowledgementRepository } from "../../repositories/DeliveryAc
 import { PublicationDiagnosticError, transientPublicationDiagnostic, validatePlanPublicationDependencies } from "../../domain/publicationDiagnostics";
 import type { DraftEnvelope } from "../../repositories/DraftRepository";
 import { dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, validateDraftDependencies, workoutDraftDependency } from "../../domain/planDraftDependencies";
+import { governedPublicationRepository } from "../../repositories/GovernedPublicationRepository";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const { planId: routePlanId } = useParams<{ planId: string }>();
@@ -213,7 +214,6 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       setPublishStatus("");
       await recordDelivery('VALIDATING');
       const frozenPlan = structuredClone(plan);
-      const frozenPlanEnvelope = await draftRepository.getPlanEnvelope(identity.humanUserId, plan.planId);
       const freshDrafts = new Map((await draftRepository.listWorkoutEnvelopes(identity.humanUserId)).map(envelope => [envelope.globalId, envelope]));
       const dependencyIssues = validateDraftDependencies(frozenPlan, identity.humanUserId, freshDrafts);
       if (dependencyIssues.length) throw new PublicationDiagnosticError(dependencyIssues.map(issue => ({
@@ -227,73 +227,21 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       const newPlan: Plan = structuredClone(frozenPlan);
       if (!newPlan.startDate) newPlan.startDate = format(weekStart, 'yyyy-MM-dd');
       if (!newPlan.timezone) newPlan.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      const workoutVersions = new Map<string, string>();
-      const resolvedWorkouts = new Map<string, NonNullable<import("../../domain/types").PlanPlacement["resolvedWorkout"]>>();
-      await recordDelivery('PUBLISHING_WORKOUTS');
-      for (const week of newPlan.weeks) {
-         for (const placement of week.placements) {
-             const knownVersion = workoutVersions.get(placement.workoutId);
-             if (knownVersion) { placement.workoutVersionId = knownVersion; placement.resolvedWorkout = resolvedWorkouts.get(placement.workoutId); delete placement.dependency; continue; }
-             if (placement.dependency?.kind === 'PUBLISHED_WORKOUT_VERSION') {
-               const fixed = await publicationRepository.getPublishedVersion<Workout>(identity.humanUserId, 'workout', placement.dependency.versionId);
-               if (!fixed || fixed.globalId !== placement.dependency.workoutGlobalId || fixed.revision !== placement.dependency.revision || fixed.contentChecksum !== placement.dependency.checksum || fixed.schemaVersion !== placement.dependency.schemaVersion || fixed.publicationState !== 'PUBLISHED') throw new Error('PUBLISHED_DEPENDENCY_MISMATCH');
-               placement.workoutVersionId = fixed.versionId;
-               placement.resolvedWorkout = { workoutGlobalId: fixed.globalId, versionId: fixed.versionId, revision: fixed.revision, checksum: fixed.contentChecksum, schemaVersion: fixed.schemaVersion };
-               delete placement.dependency; workoutVersions.set(placement.workoutId, fixed.versionId); resolvedWorkouts.set(placement.workoutId, placement.resolvedWorkout); continue;
-             }
-             const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
-             if (!workout) throw new Error(`Missing workout reference`);
-             const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
-             
-             const checksum = await publicationRepository.generateChecksum(workout);
-             let pub = pubs.find(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED');
-             if (!pub) {
-                 pub = await publicationRepository.publishAuthenticated('workout', workout.workoutId, workout, [workout.discipline]);
-             } else {
-                 await syncManager.queueUpload(pub, 'workout', 'publication');
-             }
-             placement.workoutVersionId = pub.versionId;
-             placement.resolvedWorkout = { workoutGlobalId: pub.globalId, versionId: pub.versionId, revision: pub.revision, checksum: pub.contentChecksum, schemaVersion: pub.schemaVersion };
-             resolvedWorkouts.set(placement.workoutId, placement.resolvedWorkout);
-             delete placement.dependency;
-             workoutVersions.set(placement.workoutId, pub.versionId);
-         }
-      }
-      const currentPlanEnvelope = await draftRepository.getPlanEnvelope(identity.humanUserId, plan.planId);
-      const currentDrafts = new Map((await draftRepository.listWorkoutEnvelopes(identity.humanUserId)).map(envelope => [envelope.globalId, envelope]));
-      const changedPlan = frozenPlanEnvelope && currentPlanEnvelope && frozenPlanEnvelope.revision !== currentPlanEnvelope.revision;
-      const dependencyDraftIds = new Set(frozenPlan.weeks.flatMap(week => week.placements.flatMap(item => item.dependency?.kind === 'WORKOUT_DRAFT' ? [item.dependency.workoutDraftId] : [])));
-      const changedWorkout = [...dependencyDraftIds].some(id => currentDrafts.get(id)?.revision !== freshDrafts.get(id)?.revision);
-      if (changedPlan || changedWorkout) throw new Error('CHANGED_WHILE_PREPARING');
-      await recordDelivery('PUBLISHING_PLAN', { workoutVersionIds: [...workoutVersions.values()] });
-      newPlan.schemaVersion = 'humanv1.plan/1';
-      delete newPlan.dependencyKinds;
-      delete newPlan.dependencyOwnerHumanUserId;
-      newPlan.destinationApplication = 'HUMAN_STRENGTH';
-      newPlan.workoutVersionIds = [...workoutVersions.values()].sort();
-      const planPublication = await publicationRepository.publishAuthenticated('plan', newPlan.planId, newPlan, ['PLAN']);
-      const projection = await crossAppRepository.deliverPublishedPlan(identity.humanUserId, newPlan, {
-        planVersionId: planPublication.versionId,
-        planChecksum: planPublication.contentChecksum,
-        planRevision: planPublication.revision,
-        workoutVersionIds: [...workoutVersions.values()],
-        destinationApplication: 'HUMAN_STRENGTH',
-      });
-      if (!navigator.onLine || projection.queued) {
-        await recordDelivery('QUEUED_OFFLINE', { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId });
-        return;
-      }
-      await recordDelivery('SENDING', { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId });
+      if (!navigator.onLine) { await recordDelivery('QUEUED_OFFLINE'); return; }
+      await draftRepository.savePlanDraft(identity.humanUserId, newPlan);
       await syncManager.syncPending();
-      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'plan');
-      const current = records.find(record => (record.envelope as PublishedEnvelope<Plan>).versionId === planPublication.versionId);
-      if (current?.status === 'CONFLICT' || current?.status === 'FAILED') throw new Error(current.lastErrorCode ?? 'UPLOAD_FAILED');
-      const details = { workoutVersionIds: [...workoutVersions.values()], planVersionId: planPublication.versionId, planChecksum: planPublication.contentChecksum, planRevision: planPublication.revision };
+      const persisted = await draftRepository.getPlanEnvelope(identity.humanUserId, newPlan.planId);
+      if (!persisted) throw new Error('PLAN_DRAFT_NOT_FOUND');
+      await recordDelivery('PUBLISHING_WORKOUTS');
+      const publication = await governedPublicationRepository.publishPlan(newPlan.planId, persisted.revision);
+      const details = { workoutVersionIds: publication.workoutVersionIds, planVersionId: publication.planVersionId, planChecksum: publication.planChecksum, planRevision: publication.planRevision };
+      await recordDelivery('PUBLISHING_PLAN', details);
+      await recordDelivery('SENDING', details);
       await recordDelivery('SENT_TO_HUMANV1', details);
       const acknowledgement = await deliveryAcknowledgementRepository.findExactPlan(identity.humanUserId, {
-        planGlobalId: newPlan.planId, planVersionId: planPublication.versionId,
-        planChecksum: planPublication.contentChecksum, sourceRevision: planPublication.revision,
-        workoutVersionIds: [...workoutVersions.values()],
+        planGlobalId: newPlan.planId, planVersionId: publication.planVersionId,
+        planChecksum: publication.planChecksum, sourceRevision: publication.planRevision,
+        workoutVersionIds: publication.workoutVersionIds,
       });
       if (acknowledgement?.state === 'APPLIED') await recordDelivery('AVAILABLE_IN_HUMANV1', details);
       else if (acknowledgement?.state === 'CONFLICT') await recordDelivery('CONFLICT', { ...details, failureCategory: acknowledgement.reasonCode ?? 'Plan conflict' });
@@ -315,7 +263,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
          for (const placement of week.placements) {
              const workout = availableWorkouts.find(w => w.workoutId === placement.workoutId);
              if (workout) {
-                 const pubs = await publicationRepository.listPublishedVersions(identity.humanUserId, 'workout', workout.workoutId);
+                  const pubs = await governedPublicationRepository.listWorkoutVersions(identity.humanUserId, workout.workoutId);
                  const checksum = await publicationRepository.generateChecksum(workout);
                  const exact = pubs.some(candidate => candidate.contentChecksum === checksum && candidate.publicationState === 'PUBLISHED');
                  const target = exact ? reused : pubs.length ? changed : deps;

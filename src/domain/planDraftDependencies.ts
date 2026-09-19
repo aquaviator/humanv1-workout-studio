@@ -1,8 +1,32 @@
 import type { DraftEnvelope } from "../repositories/DraftRepository";
-import type { Plan, PlanDraftDependency, PlanPlacement, Workout } from "./types";
+import type { Plan, PlanDraftDependency, PlanDraftDependencyRecord, PlanPlacement, Workout } from "./types";
 import { validateWorkoutForPublication } from "./validation/workoutValidation";
 
 export const STUDIO_PLAN_DRAFT_SCHEMA = "humanv1.studio-plan-draft/1" as const;
+export const STUDIO_PLAN_DRAFT_DEPENDENCY_SCHEMA = "humanv1.studio-plan-draft-dependency/1" as const;
+
+export const planDependencyId = (planId: string, placementId: string) => `${planId}__${placementId}`;
+
+export function normalizePlanDependencyRecords(plan: Plan, owner: string, revision: number, createdAt: string, updatedAt: string): PlanDraftDependencyRecord[] {
+  const records: PlanDraftDependencyRecord[] = [];
+  for (const week of plan.weeks) for (const placement of week.placements) {
+    const dependency = placement.dependency;
+    if (!dependency) continue;
+    const common = { schemaVersion: STUDIO_PLAN_DRAFT_DEPENDENCY_SCHEMA, dependencyId: planDependencyId(plan.planId, placement.placementId), humanUserId: owner,
+      planId: plan.planId, placementId: placement.placementId, dependencyKind: dependency.kind, displayName: dependency.displayName,
+      revision, createdAt, updatedAt, deletedAt: null } as const;
+    if (dependency.kind === "WORKOUT_DRAFT") records.push({ ...common, referencedStableId: dependency.workoutDraftId, expectedRevision: dependency.expectedRevision,
+      expectedUpdatedAt: dependency.expectedUpdatedAt ?? null, immutableVersionId: null, immutableRevision: null, immutableChecksum: null,
+      immutableSchemaVersion: null, provenance: dependency.originApplication });
+    else if (dependency.kind === "PUBLISHED_WORKOUT_VERSION") records.push({ ...common, referencedStableId: dependency.workoutGlobalId, expectedRevision: null,
+      expectedUpdatedAt: null, immutableVersionId: dependency.versionId, immutableRevision: dependency.revision, immutableChecksum: dependency.checksum,
+      immutableSchemaVersion: dependency.schemaVersion, provenance: "IMMUTABLE_PUBLICATION" });
+    else records.push({ ...common, referencedStableId: dependency.templateId, expectedRevision: null, expectedUpdatedAt: null,
+      immutableVersionId: dependency.immutableVersionId, immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null,
+      provenance: dependency.provenance });
+  }
+  return records;
+}
 export type LegacyDependencyClassification = "WORKOUT_DRAFT" | "PUBLISHED_WORKOUT_VERSION" | "GOVERNED_TEMPLATE" | "NEEDS_REVIEW";
 export interface DependencyIssue { placementId: string; workoutId: string; displayName: string; state: "MISSING" | "ARCHIVED" | "INVALID" | "CROSS_OWNER" | "CHANGED" | "NEEDS_REVIEW"; message: string }
 
@@ -31,6 +55,8 @@ export function migrateLegacyPlanDraft(plan: Plan, owner: string, drafts: Readon
   }
   copy.schemaVersion = STUDIO_PLAN_DRAFT_SCHEMA; copy.dependencyOwnerHumanUserId = owner;
   copy.dependencyKinds = [...new Set(copy.weeks.flatMap(week => week.placements.flatMap(item => item.dependency ? [item.dependency.kind] : [])))].sort();
+  copy.dependencyStorageVersion = 1;
+  copy.dependencyCount = copy.weeks.reduce((count, week) => count + week.placements.filter(item => item.dependency).length, 0);
   return { plan: copy, classifications };
 }
 

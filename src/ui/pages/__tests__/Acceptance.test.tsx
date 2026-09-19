@@ -45,6 +45,25 @@ vi.mock('../../../repositories/FirebaseCatalogueRepository', () => ({
   ])) },
 }));
 
+vi.mock('../../../repositories/GovernedPublicationRepository', () => ({
+  governedPublicationRepository: {
+    listWorkoutVersions: vi.fn(async () => []),
+    publishWorkout: vi.fn(),
+    publishPlan: vi.fn(),
+  },
+}));
+vi.mock('../../../repositories/DeliveryAcknowledgementRepository', () => ({
+  deliveryAcknowledgementRepository: { findExactPlan: vi.fn(async () => null), findExactWorkout: vi.fn(async () => null), listForWorkout: vi.fn(async () => []) },
+}));
+vi.mock('../../../repositories/CrossAppRepository', () => ({
+  crossAppRepository: { listAppWorkouts: vi.fn(async () => []), listAppPlans: vi.fn(async () => []), listPrivateExercises: vi.fn(async () => []),
+    saveAppWorkout: vi.fn(async () => undefined), saveAppPlan: vi.fn(async () => undefined) },
+  markCatalogueSource: (exercise: any) => ({ ...exercise, source: 'HUMANV1_CATALOGUE' }),
+}));
+vi.mock('../../../repositories/PublicationRepository', () => ({
+  publicationRepository: { generateChecksum: vi.fn(async () => 'a'.repeat(64)), listPublishedVersions: vi.fn(async () => []) },
+}));
+
 
 const { workoutsDb, protocolsDb, plansDb } = vi.hoisted(() => {
   const w = new Map();
@@ -59,7 +78,7 @@ const { workoutsDb, protocolsDb, plansDb } = vi.hoisted(() => {
   return { workoutsDb: w, protocolsDb: p, plansDb: pl };
 });
 
-vi.mock('../../repositories/DraftRepository', () => ({
+vi.mock('../../../repositories/DraftRepository', () => ({
   draftRepository: {
     listWorkoutDrafts: vi.fn().mockImplementation(() => Promise.resolve(Array.from(workoutsDb.values()))),
     listWorkoutEnvelopes: vi.fn().mockImplementation(() => Promise.resolve(Array.from(workoutsDb.values()).map((payload: any) => ({ schemaVersion: 1, globalId: payload.workoutId, humanUserId: 'test-user', revision: 1, status: 'DRAFT', payload, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' })))),

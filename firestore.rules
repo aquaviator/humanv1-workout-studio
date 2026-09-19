@@ -117,11 +117,62 @@ service cloud.firestore {
     }
     function validPlanDraftDependencies(humanUserId) {
       let payload = request.resource.data.payload;
-      return payload.schemaVersion != "humanv1.studio-plan-draft/1" || (
-        payload.dependencyOwnerHumanUserId == humanUserId
+      return payload.schemaVersion == "humanv1.studio-plan-draft/1"
+        && payload.dependencyOwnerHumanUserId == humanUserId
+        && payload.dependencyStorageVersion == 1
+        && payload.dependencyCount is int
+        && payload.dependencyCount >= 0
         && payload.dependencyKinds is list
-        && payload.dependencyKinds.hasOnly(["WORKOUT_DRAFT", "PUBLISHED_WORKOUT_VERSION", "GOVERNED_TEMPLATE"])
-      );
+        && payload.dependencyKinds.hasOnly(["WORKOUT_DRAFT", "PUBLISHED_WORKOUT_VERSION", "GOVERNED_TEMPLATE"]);
+    }
+    function validPlanDraftDependency(humanUserId, dependencyId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          "schemaVersion", "dependencyId", "humanUserId", "planId", "placementId",
+          "dependencyKind", "referencedStableId", "expectedRevision", "expectedUpdatedAt",
+          "immutableVersionId", "immutableRevision", "immutableChecksum", "immutableSchemaVersion",
+          "displayName", "provenance", "revision", "createdAt", "updatedAt", "deletedAt"
+        ])
+        && data.schemaVersion == "humanv1.studio-plan-draft-dependency/1"
+        && data.dependencyId == dependencyId
+        && data.dependencyId == data.planId + "__" + data.placementId
+        && data.humanUserId == humanUserId
+        && data.planId is string && data.planId != ""
+        && data.placementId is string && data.placementId != ""
+        && data.referencedStableId is string && data.referencedStableId != ""
+        && data.displayName is string && data.displayName != ""
+        && data.provenance is string && data.provenance != ""
+        && data.revision is int && data.revision >= 1
+        && data.createdAt is string && data.updatedAt is string
+        && (data.deletedAt == null || data.deletedAt is string)
+        && exists(/databases/$(database)/documents/users/$(humanUserId)/planDrafts/$(data.planId))
+        && ((data.dependencyKind == "WORKOUT_DRAFT"
+          && data.expectedRevision is int && data.expectedRevision >= 1
+          && (data.expectedUpdatedAt == null || data.expectedUpdatedAt is string)
+          && data.immutableVersionId == null && data.immutableRevision == null
+          && data.immutableChecksum == null && data.immutableSchemaVersion == null
+          && data.provenance == "WORKOUT_STUDIO"
+          && get(/databases/$(database)/documents/users/$(humanUserId)/workoutDrafts/$(data.referencedStableId)).data.humanUserId == humanUserId
+          && get(/databases/$(database)/documents/users/$(humanUserId)/workoutDrafts/$(data.referencedStableId)).data.globalId == data.referencedStableId
+          && get(/databases/$(database)/documents/users/$(humanUserId)/workoutDrafts/$(data.referencedStableId)).data.revision == data.expectedRevision
+          && get(/databases/$(database)/documents/users/$(humanUserId)/workoutDrafts/$(data.referencedStableId)).data.deletedAt == null)
+        || (data.dependencyKind == "PUBLISHED_WORKOUT_VERSION"
+          && data.expectedRevision == null && data.expectedUpdatedAt == null
+          && data.immutableVersionId is string && data.immutableVersionId != ""
+          && data.immutableRevision is int && data.immutableRevision >= 1
+          && data.immutableChecksum is string && data.immutableChecksum.matches("^[0-9a-f]{64}$")
+          && data.immutableSchemaVersion == "humanv1.canonical-workout/1"
+          && data.provenance == "IMMUTABLE_PUBLICATION"
+          && get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(data.immutableVersionId)).data.humanUserId == humanUserId
+          && get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(data.immutableVersionId)).data.globalId == data.referencedStableId
+          && get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(data.immutableVersionId)).data.revision == data.immutableRevision
+          && get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(data.immutableVersionId)).data.contentChecksum == data.immutableChecksum
+          && get(/databases/$(database)/documents/users/$(humanUserId)/publishedWorkouts/$(data.immutableVersionId)).data.tombstoneState == "ACTIVE")
+        || (data.dependencyKind == "GOVERNED_TEMPLATE"
+          && data.expectedRevision == null && data.expectedUpdatedAt == null
+          && data.immutableVersionId is string && data.immutableVersionId != ""
+          && data.immutableRevision == null && data.immutableChecksum == null && data.immutableSchemaVersion == null
+          && data.provenance in ["RESEARCH_CANDIDATE", "GOVERNED_LIBRARY"]));
     }
     function createsOwnedVersionedRecord(humanUserId, documentId) {
       return ownsHumanRoot(humanUserId)
@@ -348,15 +399,11 @@ service cloud.firestore {
       // application validation proves every placement has that version key.
       match /publishedWorkouts/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if hasActiveStudioEntitlement(humanUserId)
-          && validPublishedVersion(humanUserId, versionId, "workout");
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
       match /publishedPlans/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if hasActiveStudioEntitlement(humanUserId)
-          && validPublishedPlan(humanUserId, versionId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
       match /publishedProtocols/{versionId} {
         allow read: if ownsHumanRoot(humanUserId);
@@ -366,21 +413,31 @@ service cloud.firestore {
       }
       match /workoutDeliveryAcks/{acknowledgementId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId)
-          && validWorkoutDeliveryAck(humanUserId, acknowledgementId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
       match /planDeliveryAcks/{acknowledgementId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if ownsHumanRoot(humanUserId)
-          && validPlanDeliveryAck(humanUserId, acknowledgementId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
       match /processedCommands/{document} { allow read, write: if ownsHumanRoot(humanUserId); }
       match /trainingPlans/{document} {
         allow read: if ownsHumanRoot(humanUserId);
         allow create: if createsOwnedPlannerRecord(humanUserId) && createsOwnedVersionedRecord(humanUserId, document);
         allow update: if updatesOwnedPlannerRecord(humanUserId) && updatesOwnedVersionedRecord(humanUserId, document);
+        allow delete: if false;
+      }
+      match /planDraftDependencies/{dependencyId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create: if hasActiveStudioEntitlement(humanUserId) && validPlanDraftDependency(humanUserId, dependencyId);
+        allow update: if hasActiveStudioEntitlement(humanUserId)
+          && validPlanDraftDependency(humanUserId, dependencyId)
+          && resource.data.humanUserId == humanUserId
+          && request.resource.data.humanUserId == resource.data.humanUserId
+          && request.resource.data.dependencyId == resource.data.dependencyId
+          && request.resource.data.planId == resource.data.planId
+          && request.resource.data.placementId == resource.data.placementId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.revision > resource.data.revision;
         allow delete: if false;
       }
       match /plannedWorkouts/{document} {

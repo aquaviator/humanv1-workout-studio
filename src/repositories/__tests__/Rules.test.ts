@@ -14,6 +14,14 @@ const published = (humanUserId: string, globalId: string, contentType: 'workout'
   sourceDraftId: globalId, payload: contentType === 'plan' ? { destinationApplication: 'HUMAN_STRENGTH', workoutVersionIds: ['workout-1_r1_aaaaaaaaaaaa'], weeks: [{ placements: [{ workoutVersionId: 'workout-1_r1_aaaaaaaaaaaa' }] }] } : {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   publishedAt: '2026-01-01T00:00:00.000Z', contentChecksum: 'a'.repeat(64), versionId: `${globalId}_v1`, contentType, compatibleTags: [],
 });
+const planPayload = (humanUserId = 'human_1') => ({ schemaVersion: 'humanv1.studio-plan-draft/1', dependencyOwnerHumanUserId: humanUserId,
+  dependencyStorageVersion: 1, dependencyCount: 1, dependencyKinds: ['WORKOUT_DRAFT'], weeks: [{ weekId: 'week-1', weekNumber: 1,
+    placements: [{ placementId: 'placement-1', workoutId: 'workout-1', dayOfWeek: 1 }] }] });
+const dependency = (overrides: Record<string, unknown> = {}) => ({ schemaVersion: 'humanv1.studio-plan-draft-dependency/1',
+  dependencyId: 'plan-draft-1__placement-1', humanUserId: 'human_1', planId: 'plan-draft-1', placementId: 'placement-1',
+  dependencyKind: 'WORKOUT_DRAFT', referencedStableId: 'workout-1', expectedRevision: 1, expectedUpdatedAt: '2026-01-01T00:00:01.000Z',
+  immutableVersionId: null, immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null, displayName: 'Workout',
+  provenance: 'WORKOUT_STUDIO', revision: 1, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:01.000Z', deletedAt: null, ...overrides });
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
@@ -58,10 +66,41 @@ describe('Firestore Security Rules', () => {
   it('accepts owner-bound Studio plan draft dependencies and rejects cross-owner or unknown kinds', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const value = draft('human_1', 'plan-draft-1', 1);
-    const validPayload = { schemaVersion: 'humanv1.studio-plan-draft/1', dependencyOwnerHumanUserId: 'human_1', dependencyKinds: ['WORKOUT_DRAFT'], weeks: [] };
+    const validPayload = planPayload();
     await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...value, payload: validPayload }));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-cross'), { ...draft('human_1', 'plan-draft-cross', 1), payload: { ...validPayload, dependencyOwnerHumanUserId: 'human_2' } }));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-kind'), { ...draft('human_1', 'plan-draft-kind', 1), payload: { ...validPayload, dependencyKinds: ['UNTRUSTED'] } }));
+  });
+  it('validates every normalized dependency record and legitimate lifecycle', async () => {
+    const alice = testEnv.authenticatedContext('auth_1').firestore();
+    await testEnv.withSecurityRulesDisabled(async context => {
+      const admin = context.firestore();
+      await setDoc(doc(admin, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...draft('human_1', 'plan-draft-1', 1), payload: planPayload() });
+      await setDoc(doc(admin, 'users', 'human_1', 'workoutDrafts', 'workout-1'), draft('human_1', 'workout-1', 1));
+      await setDoc(doc(admin, 'users', 'human_1', 'publishedWorkouts', 'workout-fixed-r1'), { ...published('human_1', 'workout-1', 'workout'), versionId: 'workout-fixed-r1' });
+    });
+    const base = collection(alice, 'users', 'human_1', 'planDraftDependencies');
+    const ref = doc(base, 'plan-draft-1__placement-1');
+    await assertSucceeds(setDoc(ref, dependency()));
+    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: '2026-01-02T00:00:00.000Z', deletedAt: '2026-01-02T00:00:00.000Z' }));
+    await assertFails(updateDoc(ref, { revision: 2, updatedAt: '2026-01-03T00:00:00.000Z' }));
+    await assertFails(updateDoc(ref, { revision: 3, createdAt: 'rewritten' }));
+    await assertFails(setDoc(doc(base, 'wrong-path'), dependency()));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-2'), dependency({ dependencyId: 'plan-draft-1__placement-2', placementId: 'placement-2', humanUserId: 'human_2' })));
+    const { humanUserId: _owner, ...missingOwner } = dependency({ dependencyId: 'plan-draft-1__placement-3', placementId: 'placement-3' });
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-3'), missingOwner));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-4'), dependency({ dependencyId: 'plan-draft-1__placement-4', placementId: 'placement-4', dependencyKind: 'UNKNOWN' })));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-5'), dependency({ dependencyId: 'plan-draft-1__placement-5', placementId: 'placement-5', immutableVersionId: 'fake' })));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-6'), dependency({ dependencyId: 'plan-draft-1__placement-6', placementId: 'placement-6', referencedStableId: 'missing-workout' })));
+    const fixed = dependency({ dependencyId: 'plan-draft-1__placement-7', placementId: 'placement-7', dependencyKind: 'PUBLISHED_WORKOUT_VERSION', expectedRevision: null,
+      expectedUpdatedAt: null, immutableVersionId: 'workout-fixed-r1', immutableRevision: 1, immutableChecksum: 'a'.repeat(64), immutableSchemaVersion: 'humanv1.canonical-workout/1', provenance: 'IMMUTABLE_PUBLICATION' });
+    await assertSucceeds(setDoc(doc(base, 'plan-draft-1__placement-7'), fixed));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-8'), { ...fixed, dependencyId: 'plan-draft-1__placement-8', placementId: 'placement-8', immutableChecksum: null }));
+    await assertSucceeds(setDoc(doc(base, 'plan-draft-1__placement-9'), dependency({ dependencyId: 'plan-draft-1__placement-9', placementId: 'placement-9', dependencyKind: 'GOVERNED_TEMPLATE',
+      expectedRevision: null, expectedUpdatedAt: null, immutableVersionId: 'research-v1', immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null, provenance: 'RESEARCH_CANDIDATE' })));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-10'), dependency({ dependencyId: 'plan-draft-1__placement-10', placementId: 'placement-10', dependencyKind: 'GOVERNED_TEMPLATE', immutableVersionId: null })));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-11'), { ...dependency({ dependencyId: 'plan-draft-1__placement-11', placementId: 'placement-11' }), unexpected: true }));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'legacy-new'), draft('human_1', 'legacy-new', 1)));
   });
   it('allows only owner read of current and denies all client entitlement mutations', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
@@ -86,12 +125,13 @@ describe('Firestore Security Rules', () => {
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'workoutDrafts', 'expired'), draft('human_1', 'expired', 1)));
   });
   it.each([
-    ['publishedWorkouts', 'workout'], ['publishedPlans', 'plan'], ['publishedProtocols', 'protocol'],
-  ] as const)('allows owner create/read and makes %s immutable', async (collectionName, contentType) => {
+    ['publishedWorkouts', 'workout'], ['publishedPlans', 'plan'],
+  ] as const)('denies direct client create and keeps governed %s immutable', async (collectionName, contentType) => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const value = published('human_1', `${contentType}-1`, contentType);
     const ref = doc(alice, 'users', 'human_1', collectionName, value.versionId);
-    await assertSucceeds(setDoc(ref, value));
+    await assertFails(setDoc(ref, value));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', collectionName, value.versionId), value));
     await assertSucceeds(getDoc(ref));
     await assertFails(updateDoc(ref, { revision: 2 }));
     await assertFails(deleteDoc(ref));
@@ -102,7 +142,7 @@ describe('Firestore Security Rules', () => {
     const bob = testEnv.authenticatedContext('auth_2').firestore();
     const value = published('human_1', 'workout-1', 'workout');
     const ref = doc(alice, 'users', 'human_1', 'publishedWorkouts', value.versionId);
-    await assertSucceeds(setDoc(ref, value));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', 'publishedWorkouts', value.versionId), value));
     await assertFails(getDoc(doc(bob, 'users', 'human_1', 'publishedWorkouts', value.versionId)));
     await assertFails(setDoc(doc(bob, 'users', 'human_1', 'publishedWorkouts', 'workout-2_v1'), published('human_1', 'workout-2', 'workout')));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'publishedWorkouts', 'workout-3_v1'), published('human_2', 'workout-3', 'workout')));
@@ -124,13 +164,14 @@ describe('Firestore Security Rules', () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
     const bob = testEnv.authenticatedContext('auth_2').firestore();
     const publication = published('human_1', 'plan-ack', 'plan');
-    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'publishedPlans', publication.versionId), publication));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', 'publishedPlans', publication.versionId), publication));
     const acknowledgement = { schemaVersion: 1, acknowledgementId: 'ack-plan-1', humanUserId: 'human_1',
       planGlobalId: 'plan-ack', planVersionId: publication.versionId, planChecksum: publication.contentChecksum,
       applicationId: 'HUMAN_STRENGTH', sourceRevision: 1, workoutVersionIds: ['workout-1_r1_aaaaaaaaaaaa'],
       state: 'APPLIED', reasonCode: null, clientAppliedAtMillis: 1, createdAt: serverTimestamp() };
     const ref = doc(alice, 'users', 'human_1', 'planDeliveryAcks', 'ack-plan-1');
-    await assertSucceeds(setDoc(ref, acknowledgement));
+    await assertFails(setDoc(ref, acknowledgement));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', 'planDeliveryAcks', 'ack-plan-1'), { ...acknowledgement, createdAt: new Date() }));
     await assertFails(updateDoc(ref, { state: 'REJECTED' }));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDeliveryAcks', 'bad-checksum'), { ...acknowledgement, acknowledgementId: 'bad-checksum', planChecksum: 'b'.repeat(64), createdAt: serverTimestamp() }));
     await assertFails(getDoc(doc(bob, 'users', 'human_1', 'planDeliveryAcks', 'ack-plan-1')));

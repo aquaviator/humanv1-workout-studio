@@ -2,6 +2,7 @@ import { get, set, del, keys } from 'idb-keyval';
 import { Workout, Plan, Protocol } from '../domain/types';
 import { syncManager } from './SyncManager';
 import { assertMutationAllowed } from '../config/mutationPolicy';
+import { normalizePlanDependencyRecords } from '../domain/planDraftDependencies';
 
 export interface DraftEnvelope<T> {
   schemaVersion: number;
@@ -108,6 +109,7 @@ export class DraftRepository {
       originClientId: "web_local_client",
     };
     await set(key, envelope);
+    await syncManager.queuePlanDependencies(envelope, normalizePlanDependencyRecords(plan, userId, envelope.revision, envelope.createdAt, envelope.updatedAt));
     await syncManager.queueUpload(envelope, "plan");
   }
 

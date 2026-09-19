@@ -136,6 +136,28 @@ export type PlanDraftDependency =
   | { kind: "PUBLISHED_WORKOUT_VERSION"; workoutGlobalId: StableId; versionId: StableId; revision: number; checksum: string; schemaVersion: "humanv1.canonical-workout/1"; displayName: string }
   | { kind: "GOVERNED_TEMPLATE"; templateId: StableId; immutableVersionId: StableId; displayName: string; provenance: "RESEARCH_CANDIDATE" | "GOVERNED_LIBRARY" };
 
+export interface PlanDraftDependencyRecord {
+  schemaVersion: "humanv1.studio-plan-draft-dependency/1";
+  dependencyId: StableId;
+  humanUserId: StableId;
+  planId: StableId;
+  placementId: StableId;
+  dependencyKind: PlanDraftDependency["kind"];
+  referencedStableId: StableId;
+  expectedRevision: number | null;
+  expectedUpdatedAt: string | null;
+  immutableVersionId: StableId | null;
+  immutableRevision: number | null;
+  immutableChecksum: string | null;
+  immutableSchemaVersion: string | null;
+  displayName: string;
+  provenance: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
 export interface PlanWeek {
   weekId: StableId;
   weekNumber: number;
@@ -156,6 +178,8 @@ export interface Plan {
   weeks: PlanWeek[];
   notes?: string;
   reconstructionDiagnostics?: ReconstructionDiagnostic[];
-  dependencyOwnerHumanUserId?: StableId;
-  dependencyKinds?: Array<PlanDraftDependency["kind"]>;
+    dependencyOwnerHumanUserId?: StableId;
+    dependencyKinds?: Array<PlanDraftDependency["kind"]>;
+    dependencyStorageVersion?: 1;
+    dependencyCount?: number;
 }

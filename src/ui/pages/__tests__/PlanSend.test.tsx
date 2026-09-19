@@ -6,6 +6,7 @@ import { axe } from 'jest-axe';
 const state = vi.hoisted(() => ({
   phases: [] as string[],
   publish: vi.fn(),
+  governedPublish: vi.fn(),
   plan: {
     schemaVersion: 'humanv1.plan/1', planId: 'plan_send_fixture', title: 'Plan', description: '',
     weeks: [{ weekId: 'week_1', weekNumber: 1, label: 'Week 1', placements: [{ placementId: 'placement_1', dayOfWeek: 1, workoutId: 'workout_1', workoutVersionId: 'workout_1_v1', preferredMinuteOfDay: null, reminderEnabled: false, notes: '' }] }],
@@ -29,6 +30,10 @@ vi.mock('../../../repositories/PublicationRepository', () => ({ publicationRepos
   generateChecksum: vi.fn(async () => 'a'.repeat(64)), listPublishedVersions: vi.fn(async () => []),
   publishAuthenticated: state.publish,
 } }));
+vi.mock('../../../repositories/GovernedPublicationRepository', () => ({ governedPublicationRepository: {
+  publishPlan: state.governedPublish,
+  listWorkoutVersions: vi.fn(async () => []),
+} }));
 vi.mock('../../../repositories/SyncManager', () => ({ syncManager: {
   listPublicationSyncRecords: vi.fn(async (_owner: string, type: string) => type === 'plan' ? [{ status: 'SYNCED', envelope: { versionId: 'plan_send_fixture_r1_planhash' } }] : []),
   queueUpload: vi.fn(async () => undefined), syncPending: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined),
@@ -43,6 +48,9 @@ describe('Plan Send journey', () => {
   beforeEach(() => {
     state.phases.length = 0;
     state.publish.mockReset();
+    state.governedPublish.mockReset();
+    state.governedPublish.mockResolvedValue({ planId: 'plan_send_fixture', planVersionId: 'plan_send_fixture_r1_planhash', planRevision: 1,
+      planChecksum: 'b'.repeat(64), workoutVersionIds: ['workout_1_r1_workouthash'], reusedPlan: false });
     state.publish.mockImplementation(async (type: string) => type === 'workout'
       ? { globalId: 'workout_1', revision: 1, schemaVersion: 'humanv1.workout/1', versionId: 'workout_1_r1_workouthash', contentChecksum: 'a'.repeat(64), publicationState: 'PUBLISHED' }
       : { versionId: 'plan_send_fixture_r1_planhash', contentChecksum: 'b'.repeat(64), publicationState: 'PUBLISHED' });
@@ -57,8 +65,8 @@ describe('Plan Send journey', () => {
     await screen.findByRole('heading', { name: 'Send plan to my apps' });
     expect((await screen.findAllByText('Andy Test Workout')).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(state.publish).toHaveBeenCalledTimes(2));
-    expect(state.publish.mock.calls.map(call => call[0])).toEqual(['workout', 'plan']);
+    await waitFor(() => expect(state.governedPublish).toHaveBeenCalledTimes(1));
+    expect(state.publish).not.toHaveBeenCalled();
     expect(state.phases).toEqual(['VALIDATING', 'PUBLISHING_WORKOUTS', 'PUBLISHING_PLAN', 'SENDING', 'SENT_TO_HUMANV1', 'WAITING_FOR_HUMANV1']);
     expect(await screen.findByRole('heading', { name: 'Waiting for HumanV1' })).toBeInTheDocument();
     expect(screen.queryByText(/Available in HumanV1/i)).not.toBeInTheDocument();
@@ -79,7 +87,7 @@ describe('Plan Send journey', () => {
   });
 
   it('keeps transient delivery failures retryable', async () => {
-    state.publish.mockRejectedValueOnce(new Error('UPLOAD_FAILED'));
+    state.governedPublish.mockRejectedValueOnce(new Error('UPLOAD_FAILED'));
     render(<MemoryRouter initialEntries={['/plans/plan_send_fixture']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={{ humanUserId: 'synthetic_owner', email: 'owner@example.test', displayName: 'Owner' }} />} /></Routes></MemoryRouter>);
     await screen.findByDisplayValue('Plan');
     fireEvent.click(screen.getByRole('button', { name: 'Send plan to my apps' }));

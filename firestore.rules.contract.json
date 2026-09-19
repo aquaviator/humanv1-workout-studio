@@ -1,9 +1,9 @@
 {
   "ownerRepository": "aquaviator/Hv1Strength",
   "ownerBranch": "codex/studio-workout-ingestion",
-  "ownerCommit": "8760898198aab185333392bc65d48b199534c504",
+  "ownerCommit": "e1de6b9aed30de6d422513fb81d298ba66fd5bbb",
   "deployableFile": "firestore.rules",
-  "sha256": "af9b5325b32ae1054b97536b6dcadb41af2235fb4942b50c55c2154c36b8a4b8",
+  "sha256": "eb75095579a393b9d80dc3f771ab9811520abfc77300775c8ea7990b24f472a0",
   "hashNormalization": "LF",
   "firebaseProject": "hv1-platform",
   "deploymentAuthorized": false

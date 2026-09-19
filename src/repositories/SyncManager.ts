@@ -5,6 +5,7 @@ import { PublishableContent } from '../domain/publication';
 import { db } from '../config/firebase';
 import { doc, runTransaction, collection, query, getDocs, getDoc } from 'firebase/firestore';
 import { assertMutationAllowed, isReadOnlyAcceptanceMode } from '../config/mutationPolicy';
+import type { Plan, PlanDraftDependencyRecord } from '../domain/types';
 
 export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED' | 'NEEDS_USER_REVIEW';
 export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
@@ -96,10 +97,10 @@ export class SyncManager {
     const allKeys = await keys();
     const priority = (key: string) => key.startsWith('sync_pub_')
       ? key.includes('_workout_') ? 0 : key.includes('_protocol_') ? 1 : key.includes('_plan_') ? 2 : 3
-      : 4;
+      : key.includes('_workout_') ? 4 : key.includes('_protocol_') ? 5 : key.includes('_plan_') ? 6 : 7;
     // IndexedDB key enumeration is not a publication contract. Always make immutable
     // workout dependencies durable before the plan envelope that names them.
-    const syncKeys = allKeys.filter((k): k is string => typeof k === 'string' && k.startsWith('sync_'))
+    const syncKeys = allKeys.filter((k): k is string => typeof k === 'string' && k.startsWith('sync_') && !k.startsWith('sync_dependency_'))
       .sort((a, b) => priority(a) - priority(b) || a.localeCompare(b));
     for (const key of syncKeys) {
       const record = await get<SyncRecord>(key);
@@ -114,6 +115,18 @@ export class SyncManager {
         }
         await this.uploadRecord(key, record);
       }
+    }
+    // A dependency document must never precede its owner-scoped plan parent.
+    for (const key of allKeys.filter((item): item is string => typeof item === 'string' && item.startsWith('sync_dependency_')).sort()) {
+      const dependency = await get<PlanDraftDependencyRecord>(key);
+      if (!dependency) continue;
+      const ref = doc(db, 'users', dependency.humanUserId, 'planDraftDependencies', dependency.dependencyId);
+      await runTransaction(db, async transaction => {
+        const current = await transaction.get(ref);
+        if (current.exists() && current.data().revision >= dependency.revision) return;
+        transaction.set(ref, dependency);
+      });
+      await del(key);
     }
   }
 
@@ -296,6 +309,18 @@ export class SyncManager {
     await set(`drafts_${humanUserId}_${record.type}_${record.envelope.globalId}`, envelope);
     await this.queueUpload(envelope, record.type);
     await this.syncPending();
+  }
+
+  async queuePlanDependencies(envelope: DraftEnvelope<Plan>, records: PlanDraftDependencyRecord[]): Promise<void> {
+    assertMutationAllowed('queueUpload:draft:planDependency');
+    const active = new Set(records.map(record => record.dependencyId));
+    const previous = await keys();
+    const prefix = `sync_dependency_${envelope.humanUserId}_${envelope.globalId}_`;
+    for (const record of records) await set(`${prefix}${record.dependencyId}`, record);
+    for (const key of previous.filter((item): item is string => typeof item === 'string' && item.startsWith(prefix))) {
+      const prior = await get<PlanDraftDependencyRecord>(key);
+      if (prior && !active.has(prior.dependencyId)) await set(key, { ...prior, revision: envelope.revision, updatedAt: envelope.updatedAt, deletedAt: envelope.updatedAt });
+    }
   }
 }
 
