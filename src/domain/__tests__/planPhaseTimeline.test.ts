@@ -8,14 +8,15 @@ describe("plan phase timeline", () => {
     const result = buildPhaseTimeline(triathlonResearchPlans[0], "RESEARCH_CANDIDATE");
     expect(result.unavailable).toBe(false);
     expect(result.entries.map(item => [item.displayName, formatPhaseWeeks(item)])).toEqual([
-      ["Foundation Base", "Weeks 1–2"], ["Aerobic Build", "Weeks 3, 5, 6"],
-      ["Specific Peak", "Weeks 7, 9, 10"], ["Recovery Block", "Weeks 4, 8"],
+      ["Foundation Base", "Weeks 1–2"], ["Aerobic Build", "Week 3"], ["Recovery Block", "Week 4"],
+      ["Aerobic Build", "Weeks 5–6"], ["Specific Peak", "Week 7"], ["Recovery Block", "Week 8"], ["Specific Peak", "Weeks 9–10"],
       ["Exponential Taper", "Week 11"], ["Event Execution", "Week 12"],
     ]);
     for (const entry of result.entries) {
       const scheduleNames = triathlonResearchPlans[0].weeks.filter(week => entry.weekNumbers.includes(week.weekNumber)).map(week => week.phaseName);
       expect(new Set(scheduleNames)).toEqual(new Set([entry.displayName]));
     }
+    expect(result.entries.filter(item => item.displayName === "Recovery Block")).toHaveLength(2);
     expect(result.entries.find(item => item.displayName === "Recovery Block")?.recovery).toBe(true);
     expect(result.entries.find(item => item.displayName === "Exponential Taper")?.taper).toBe(true);
     expect(result.entries.find(item => item.displayName === "Event Execution")?.event).toBe(true);
@@ -33,7 +34,7 @@ describe("plan phase timeline", () => {
     const source = triathlonResearchPlans[0];
     const draft = cloneResearchPlanToDraft(source, "human_test");
     expect(draft.phases?.map(phase => phase.phaseId)).toEqual(source.phases.map(phase => phase.phaseId));
-    expect(buildPhaseTimeline(draft, "CLONED_DRAFT").entries.map(item => item.weekNumbers)).toEqual(source.phases.map(phase => source.weeks.filter(week => week.phaseId === phase.phaseId).map(week => week.weekNumber)));
+    expect(buildPhaseTimeline(draft, "CLONED_DRAFT").definitions.map(item => item.weekNumbers)).toEqual(source.phases.map(phase => source.weeks.filter(week => week.phaseId === phase.phaseId).map(week => week.weekNumber)));
   });
 
   it("maps canonical phases through cycles and handles a single phase", () => {
@@ -58,6 +59,6 @@ describe("plan phase timeline", () => {
     ["out-of-range boundaries", { phases: [{ phaseId: "p", name: "Bad", startWeek: 1, endWeek: 3 }], weeks: [{ weekNumber: 1 }, { weekNumber: 2 }] }],
     ["unexplained overlap", { phases: [{ phaseId: "p1", name: "One", weekNumbers: [1] }, { phaseId: "p2", name: "Two", weekNumbers: [1] }], weeks: [{ weekNumber: 1 }] }],
   ])("fails closed for %s", (_label, plan) => {
-    expect(buildPhaseTimeline(plan, "LEGACY_RECONSTRUCTION")).toEqual({ entries: [], unavailable: true });
+    expect(buildPhaseTimeline(plan, "LEGACY_RECONSTRUCTION")).toEqual({ entries: [], definitions: [], unavailable: true });
   });
 });
