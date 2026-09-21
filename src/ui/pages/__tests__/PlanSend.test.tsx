@@ -35,6 +35,7 @@ vi.mock('../../../repositories/GovernedPublicationRepository', () => ({ governed
   listWorkoutVersions: vi.fn(async () => []),
 } }));
 vi.mock('../../../repositories/SyncManager', () => ({ syncManager: {
+  listSyncRecords: vi.fn(async () => []),
   listPublicationSyncRecords: vi.fn(async (_owner: string, type: string) => type === 'plan' ? [{ status: 'SYNCED', envelope: { versionId: 'plan_send_fixture_r1_planhash' } }] : []),
   queueUpload: vi.fn(async () => undefined), syncPending: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined),
 } }));

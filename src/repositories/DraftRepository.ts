@@ -109,8 +109,7 @@ export class DraftRepository {
       originClientId: "web_local_client",
     };
     await set(key, envelope);
-    await syncManager.queuePlanDependencies(envelope, normalizePlanDependencyRecords(plan, userId, envelope.revision, envelope.createdAt, envelope.updatedAt));
-    await syncManager.queueUpload(envelope, "plan");
+    await syncManager.queuePlanSave(envelope, normalizePlanDependencyRecords(plan, userId, envelope.revision, envelope.createdAt, envelope.updatedAt));
   }
 
   async getPlanDraft(userId: string, planId: string): Promise<Plan | null> {

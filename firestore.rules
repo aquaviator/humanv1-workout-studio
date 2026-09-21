@@ -384,9 +384,9 @@ service cloud.firestore {
       }
       match /planDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if hasActiveStudioEntitlement(humanUserId) && createsStudioDraft(humanUserId, document) && validPlanDraftDependencies(humanUserId);
-        allow update: if hasActiveStudioEntitlement(humanUserId) && updatesStudioDraft(humanUserId, document) && validPlanDraftDependencies(humanUserId);
-        allow delete: if false;
+        // Complete plan drafts and their dependency manifests are committed by
+        // saveStudioPlanDraft in one trusted transaction.
+        allow create, update, delete: if false;
       }
       match /protocolDrafts/{document} {
         allow read: if ownsHumanRoot(humanUserId);
@@ -428,17 +428,11 @@ service cloud.firestore {
       }
       match /planDraftDependencies/{dependencyId} {
         allow read: if ownsHumanRoot(humanUserId);
-        allow create: if hasActiveStudioEntitlement(humanUserId) && validPlanDraftDependency(humanUserId, dependencyId);
-        allow update: if hasActiveStudioEntitlement(humanUserId)
-          && validPlanDraftDependency(humanUserId, dependencyId)
-          && resource.data.humanUserId == humanUserId
-          && request.resource.data.humanUserId == resource.data.humanUserId
-          && request.resource.data.dependencyId == resource.data.dependencyId
-          && request.resource.data.planId == resource.data.planId
-          && request.resource.data.placementId == resource.data.placementId
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.revision > resource.data.revision;
-        allow delete: if false;
+        allow create, update, delete: if false;
+      }
+      match /planDraftSaveAudits/{receiptId} {
+        allow read: if ownsHumanRoot(humanUserId);
+        allow create, update, delete: if false;
       }
       match /plannedWorkouts/{document} {
         allow read: if ownsHumanRoot(humanUserId);

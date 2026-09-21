@@ -68,7 +68,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   const { state: plan, set: setPlan, reset, undo, redo, canUndo, canRedo } = useHistory<Plan>(initialPlan);
   const availableWorkouts = workoutsData;
-  const [saveStatus, setSaveStatus] = useState<"Saved" | "Saving..." | "Unsaved">("Saved");
+  const [saveStatus, setSaveStatus] = useState<"Saved on this device" | "Saving to Studio" | "Needs attention">("Saved on this device");
   const [isLoading, setIsLoading] = useState(true);
   const validationErrors = React.useMemo(() => validatePlan(plan), [plan]);
   const dependencyIssues = React.useMemo(() => validateDraftDependencies(plan, identity.humanUserId, workoutDrafts), [plan, identity.humanUserId, workoutDrafts]);
@@ -100,14 +100,14 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   useEffect(() => {
     if (isLoading) return;
     if (validationErrors.length > 0) {
-      setSaveStatus("Unsaved");
+      setSaveStatus("Needs attention");
       return;
     }
     let timeout: ReturnType<typeof setTimeout>;
-    setSaveStatus("Saving...");
+    setSaveStatus("Saving to Studio");
     timeout = setTimeout(() => {
       const normalized = migrateLegacyPlanDraft(plan, identity.humanUserId, workoutDrafts).plan;
-      draftRepository.savePlanDraft(identity.humanUserId, normalized).then(() => setSaveStatus("Saved")).catch(() => setSaveStatus("Unsaved"));
+      draftRepository.savePlanDraft(identity.humanUserId, normalized).then(() => setSaveStatus("Saved on this device")).catch(() => setSaveStatus("Needs attention"));
     }, 500);
     return () => clearTimeout(timeout);
   }, [plan, identity.humanUserId, isLoading, validationErrors.length]);
@@ -164,8 +164,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   useEffect(() => {
     if (!plan.planId) return;
     const fetchStatus = async () => {
-      const records = await syncManager.listPublicationSyncRecords(identity.humanUserId, 'plan');
-      const record = records.find(r => (r.envelope as PublishedEnvelope<Plan>).sourceDraftId === plan.planId);
+      const records = await syncManager.listSyncRecords(identity.humanUserId, 'plan');
+      const record = records.find(r => r.envelope.globalId === plan.planId);
       setSyncRecord(record || null);
     };
     fetchStatus();
@@ -191,14 +191,15 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
           : `Retry required: ${deliveryAttempt.failureCategory ?? 'publication failed'}`;
       }
     }
-    if (!syncRecord) return "Ready";
+    if (!syncRecord) return "Saved on this device";
     switch (syncRecord.status) {
-      case 'QUEUED': return "Queued—will send when connected";
-      case 'SENDING': return "Sending";
-      case 'SYNCED': return "Sent to HumanV1 cloud";
-      case 'CONFLICT': return "Conflict";
-      case 'FAILED': return "Retry required";
-      default: return "";
+      case 'QUEUED': return "Saved on this device";
+      case 'SENDING': return "Saving to Studio";
+      case 'SYNCED': return "Saved in Studio";
+      case 'CONFLICT': case 'FAILED': case 'NEEDS_USER_REVIEW': return syncRecord.attention
+        ? `Needs attention: ${syncRecord.attention.explanation} Your changes remain saved on this device.`
+        : "Needs attention: review the plan and save again. Your changes remain saved on this device.";
+      default: return "Needs attention";
     }
   }, [deliveryAttempt, syncRecord, publishStatus]);
 

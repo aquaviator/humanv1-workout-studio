@@ -63,16 +63,23 @@ beforeEach(async () => {
 });
 
 describe('Firestore Security Rules', () => {
-  it('accepts owner-bound Studio plan draft dependencies and rejects cross-owner or unknown kinds', async () => {
+  it('keeps owner reads while denying every direct client plan-draft mutation', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
     const value = draft('human_1', 'plan-draft-1', 1);
     const validPayload = planPayload();
-    await assertSucceeds(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...value, payload: validPayload }));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...value, payload: validPayload }));
+    await assertSucceeds(getDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1')));
+    await assertFails(getDoc(doc(bob, 'users', 'human_1', 'planDrafts', 'plan-draft-1')));
+    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-new'), { ...value, globalId: 'plan-new', payload: { ...validPayload, planId: 'plan-new' } }));
+    await assertFails(updateDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { revision: 2 }));
+    await assertFails(deleteDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-1')));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-cross'), { ...draft('human_1', 'plan-draft-cross', 1), payload: { ...validPayload, dependencyOwnerHumanUserId: 'human_2' } }));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'plan-draft-kind'), { ...draft('human_1', 'plan-draft-kind', 1), payload: { ...validPayload, dependencyKinds: ['UNTRUSTED'] } }));
   });
-  it('validates every normalized dependency record and legitimate lifecycle', async () => {
+  it('keeps owner dependency reads while denying every direct dependency mutation', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();
+    const bob = testEnv.authenticatedContext('auth_2').firestore();
     await testEnv.withSecurityRulesDisabled(async context => {
       const admin = context.firestore();
       await setDoc(doc(admin, 'users', 'human_1', 'planDrafts', 'plan-draft-1'), { ...draft('human_1', 'plan-draft-1', 1), payload: planPayload() });
@@ -81,26 +88,12 @@ describe('Firestore Security Rules', () => {
     });
     const base = collection(alice, 'users', 'human_1', 'planDraftDependencies');
     const ref = doc(base, 'plan-draft-1__placement-1');
-    await assertSucceeds(setDoc(ref, dependency()));
-    await assertSucceeds(updateDoc(ref, { revision: 2, updatedAt: '2026-01-02T00:00:00.000Z', deletedAt: '2026-01-02T00:00:00.000Z' }));
-    await assertFails(updateDoc(ref, { revision: 2, updatedAt: '2026-01-03T00:00:00.000Z' }));
-    await assertFails(updateDoc(ref, { revision: 3, createdAt: 'rewritten' }));
-    await assertFails(setDoc(doc(base, 'wrong-path'), dependency()));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-2'), dependency({ dependencyId: 'plan-draft-1__placement-2', placementId: 'placement-2', humanUserId: 'human_2' })));
-    const { humanUserId: _owner, ...missingOwner } = dependency({ dependencyId: 'plan-draft-1__placement-3', placementId: 'placement-3' });
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-3'), missingOwner));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-4'), dependency({ dependencyId: 'plan-draft-1__placement-4', placementId: 'placement-4', dependencyKind: 'UNKNOWN' })));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-5'), dependency({ dependencyId: 'plan-draft-1__placement-5', placementId: 'placement-5', immutableVersionId: 'fake' })));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-6'), dependency({ dependencyId: 'plan-draft-1__placement-6', placementId: 'placement-6', referencedStableId: 'missing-workout' })));
-    const fixed = dependency({ dependencyId: 'plan-draft-1__placement-7', placementId: 'placement-7', dependencyKind: 'PUBLISHED_WORKOUT_VERSION', expectedRevision: null,
-      expectedUpdatedAt: null, immutableVersionId: 'workout-fixed-r1', immutableRevision: 1, immutableChecksum: 'a'.repeat(64), immutableSchemaVersion: 'humanv1.canonical-workout/1', provenance: 'IMMUTABLE_PUBLICATION' });
-    await assertSucceeds(setDoc(doc(base, 'plan-draft-1__placement-7'), fixed));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-8'), { ...fixed, dependencyId: 'plan-draft-1__placement-8', placementId: 'placement-8', immutableChecksum: null }));
-    await assertSucceeds(setDoc(doc(base, 'plan-draft-1__placement-9'), dependency({ dependencyId: 'plan-draft-1__placement-9', placementId: 'placement-9', dependencyKind: 'GOVERNED_TEMPLATE',
-      expectedRevision: null, expectedUpdatedAt: null, immutableVersionId: 'research-v1', immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null, provenance: 'RESEARCH_CANDIDATE' })));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-10'), dependency({ dependencyId: 'plan-draft-1__placement-10', placementId: 'placement-10', dependencyKind: 'GOVERNED_TEMPLATE', immutableVersionId: null })));
-    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-11'), { ...dependency({ dependencyId: 'plan-draft-1__placement-11', placementId: 'placement-11' }), unexpected: true }));
-    await assertFails(setDoc(doc(alice, 'users', 'human_1', 'planDrafts', 'legacy-new'), draft('human_1', 'legacy-new', 1)));
+    await testEnv.withSecurityRulesDisabled(async context => setDoc(doc(context.firestore(), 'users', 'human_1', 'planDraftDependencies', ref.id), dependency()));
+    await assertSucceeds(getDoc(ref));
+    await assertFails(getDoc(doc(bob, 'users', 'human_1', 'planDraftDependencies', ref.id)));
+    await assertFails(setDoc(doc(base, 'plan-draft-1__placement-2'), dependency({ dependencyId: 'plan-draft-1__placement-2', placementId: 'placement-2' })));
+    await assertFails(updateDoc(ref, { revision: 2, updatedAt: '2026-01-02T00:00:00.000Z' }));
+    await assertFails(deleteDoc(ref));
   });
   it('allows only owner read of current and denies all client entitlement mutations', async () => {
     const alice = testEnv.authenticatedContext('auth_1').firestore();

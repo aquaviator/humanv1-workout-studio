@@ -28,6 +28,8 @@ export function normalizePlanDependencyRecords(plan: Plan, owner: string, revisi
   return records;
 }
 export type LegacyDependencyClassification = "WORKOUT_DRAFT" | "PUBLISHED_WORKOUT_VERSION" | "GOVERNED_TEMPLATE" | "NEEDS_REVIEW";
+export type LegacyPlanClassification = "COMPLETE_AND_COMPATIBLE" | "MISSING_NORMALIZED_DEPENDENCIES" | "STALE_DEPENDENCY_REVISION" |
+  "AMBIGUOUS_DEPENDENCY" | "ARCHIVED_LEGACY_PLAN" | "REQUIRES_REVIEW";
 export interface DependencyIssue { placementId: string; workoutId: string; displayName: string; state: "MISSING" | "ARCHIVED" | "INVALID" | "CROSS_OWNER" | "CHANGED" | "NEEDS_REVIEW"; message: string }
 
 export function workoutDraftDependency(envelope: DraftEnvelope<Workout>): Extract<PlanDraftDependency, { kind: "WORKOUT_DRAFT" }> {
@@ -82,4 +84,17 @@ export function validateDraftDependencies(plan: Plan, owner: string, drafts: Rea
 
 export function dependencyHasUnpublishedChanges(dependency: PlanDraftDependency | undefined, drafts: ReadonlyMap<string, DraftEnvelope<Workout>>): boolean {
   return dependency?.kind === "WORKOUT_DRAFT" && (drafts.get(dependency.workoutDraftId)?.revision ?? dependency.expectedRevision) !== dependency.expectedRevision;
+}
+
+export function classifyLegacyPlan(envelope: DraftEnvelope<Plan>, records: readonly PlanDraftDependencyRecord[]): LegacyPlanClassification {
+  if (envelope.deletedAt != null) return "ARCHIVED_LEGACY_PLAN";
+  if (envelope.payload.schemaVersion !== STUDIO_PLAN_DRAFT_SCHEMA) return "REQUIRES_REVIEW";
+  const placements = envelope.payload.weeks.flatMap(week => week.placements);
+  const active = records.filter(record => record.deletedAt == null && record.planId === envelope.globalId);
+  if (active.length < placements.length) return "MISSING_NORMALIZED_DEPENDENCIES";
+  const byPlacement = new Map<string, PlanDraftDependencyRecord[]>();
+  for (const record of active) byPlacement.set(record.placementId, [...(byPlacement.get(record.placementId) ?? []), record]);
+  if (active.length !== placements.length || placements.some(item => (byPlacement.get(item.placementId)?.length ?? 0) !== 1)) return "AMBIGUOUS_DEPENDENCY";
+  if (active.some(record => record.revision !== envelope.revision)) return "STALE_DEPENDENCY_REVISION";
+  return "COMPLETE_AND_COMPATIBLE";
 }

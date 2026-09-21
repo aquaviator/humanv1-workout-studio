@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Workout } from '../../domain/types';
+import { Plan, PlanDraftDependencyRecord, Workout } from '../../domain/types';
+import { DraftEnvelope } from '../DraftRepository';
 import { PublishedEnvelope } from '../../domain/publication';
 
-const state = vi.hoisted(() => ({ values: new Map<string, unknown>(), transactionFailure: null as Error | null, transactionCount: 0, uploaded: [] as string[] }));
+const state = vi.hoisted(() => ({ values: new Map<string, unknown>(), transactionFailure: null as Error | null, transactionCount: 0, uploaded: [] as string[], callableInputs: [] as unknown[], callableFailure: null as Error | null }));
 vi.mock('idb-keyval', () => ({
   get: vi.fn((key: string) => Promise.resolve(state.values.get(key))),
   set: vi.fn((key: string, value: unknown) => { state.values.set(key, structuredClone(value)); return Promise.resolve(); }),
   keys: vi.fn(() => Promise.resolve([...state.values.keys()])), setMany: vi.fn(),
   del: vi.fn((key: string) => { state.values.delete(key); return Promise.resolve(); }),
 }));
-vi.mock('../../config/firebase', () => ({ db: {} }));
+vi.mock('../../config/firebase', () => ({ db: {}, functions: {} }));
+vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn(() => async (input: unknown) => {
+  state.callableInputs.push(structuredClone(input)); if (state.callableFailure) throw state.callableFailure;
+  return { data: { planId: 'plan-1', revision: 1, contentChecksum: 'a'.repeat(64), status: 'SAVED', idempotent: false, dependencyCount: 1, updatedAt: '2026-01-02T00:00:00.000Z' } };
+}) }));
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn((_db, ...segments: string[]) => ({ id: segments.at(-1) })), collection: vi.fn(), query: vi.fn(), getDocs: vi.fn(),
   runTransaction: vi.fn(async (_db, callback: (transaction: { get: () => Promise<{ exists: () => boolean }>; set: (ref: { id?: string }) => void }) => Promise<void>) => {
@@ -30,7 +35,7 @@ const envelope: PublishedEnvelope<Workout> = {
 };
 
 describe('SyncManager publication replay', () => {
-  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; state.uploaded.length = 0; Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
+  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; state.uploaded.length = 0; state.callableInputs.length = 0; state.callableFailure = null; Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
 
   it('durably queues offline and a reconstructed manager sees the queue', async () => {
     const manager = new SyncManager();
@@ -100,5 +105,35 @@ describe('SyncManager publication replay', () => {
     const manager = new SyncManager();
     await manager.syncPending();
     expect(state.uploaded).toEqual([envelope.versionId, planEnvelope.versionId]);
+  });
+
+  it('durably queues one complete plan-save envelope and reconnects through the callable exactly once', async () => {
+    const plan: Plan = { schemaVersion: 'humanv1.studio-plan-draft/1', planId: 'plan-1', title: 'Plan', description: '', weeks: [{ weekId: 'week-1', weekNumber: 1,
+      label: 'Week 1', placements: [{ placementId: 'placement-1', dayOfWeek: 1, workoutId: 'workout-1', preferredMinuteOfDay: null, reminderEnabled: false, notes: '',
+        dependency: { kind: 'WORKOUT_DRAFT', workoutDraftId: 'workout-1', humanUserId: 'human-1', expectedRevision: 1, displayName: 'Workout', originApplication: 'WORKOUT_STUDIO' } }] }] };
+    const draft: DraftEnvelope<Plan> = { schemaVersion: 1, globalId: 'plan-1', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: plan,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', deletedAt: null, originClientId: 'web-local' };
+    const dependency: PlanDraftDependencyRecord = { schemaVersion: 'humanv1.studio-plan-draft-dependency/1', dependencyId: 'plan-1__placement-1', humanUserId: 'human-1',
+      planId: 'plan-1', placementId: 'placement-1', dependencyKind: 'WORKOUT_DRAFT', referencedStableId: 'workout-1', expectedRevision: 1, expectedUpdatedAt: draft.updatedAt,
+      immutableVersionId: null, immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null, displayName: 'Workout', provenance: 'WORKOUT_STUDIO', revision: 1,
+      createdAt: draft.createdAt, updatedAt: draft.updatedAt, deletedAt: null };
+    const first = new SyncManager(); await first.queuePlanSave(draft, [dependency]);
+    const queued = (await new SyncManager().listSyncRecords('human-1', 'plan'))[0];
+    expect(queued.planSave?.dependencies).toHaveLength(1); expect(queued.planSave).not.toHaveProperty('humanUserId');
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    const replay = new SyncManager(); (replay as unknown as { isOnline: boolean }).isOnline = true; await replay.syncPending(); await replay.syncPending();
+    expect(state.callableInputs).toHaveLength(1); expect(state.transactionCount).toBe(0);
+    expect((await replay.listSyncRecords('human-1', 'plan'))[0].status).toBe('SYNCED');
+  });
+
+  it('keeps transient callable failures retryable and stops deterministic failures without losing the plan payload', async () => {
+    const record = { envelope: { schemaVersion: 1, globalId: 'plan-1', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: { planId: 'plan-1' }, createdAt: '', updatedAt: '', deletedAt: null, originClientId: 'web' },
+      syncType: 'draft', status: 'QUEUED', type: 'plan', planSave: { planId: 'plan-1' } };
+    state.values.set('sync_human-1_plan_plan-1', record); Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    const manager = new SyncManager(); (manager as unknown as { isOnline: boolean }).isOnline = true;
+    state.callableFailure = Object.assign(new Error('offline'), { code: 'functions/unavailable' }); await manager.syncPending();
+    expect((await manager.listSyncRecords('human-1', 'plan'))[0].status).toBe('FAILED');
+    state.callableFailure = Object.assign(new Error('Workout changed'), { code: 'functions/failed-precondition' }); await manager.syncPending();
+    const failed = (await manager.listSyncRecords('human-1', 'plan'))[0]; expect(failed.status).toBe('NEEDS_USER_REVIEW'); expect(failed.envelope).toEqual(record.envelope);
   });
 });

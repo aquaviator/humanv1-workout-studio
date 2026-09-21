@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftEnvelope } from '../../repositories/DraftRepository';
 import type { Plan, PlanPlacement, Workout } from '../types';
-import { classifyLegacyDependency, dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, STUDIO_PLAN_DRAFT_SCHEMA, validateDraftDependencies, workoutDraftDependency } from '../planDraftDependencies';
+import { classifyLegacyDependency, classifyLegacyPlan, dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, STUDIO_PLAN_DRAFT_SCHEMA, validateDraftDependencies, workoutDraftDependency } from '../planDraftDependencies';
 
 const workout = (id = 'workout-a'): Workout => ({ schemaVersion: 'humanv1.workout/1', workoutId: id, title: 'Strength A', discipline: 'STRENGTH', catalogueReleaseId: 'catalogue-1', tags: [], blocks: [{ blockId: `${id}-block`, type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Squat', efforts: [{ effortId: `${id}-set`, effortType: 'WORKING', prescriptions: [{ prescriptionId: `${id}-rx`, metricKey: 'repetitions', targetValue: 8 }] }] }] });
 const envelope = (overrides: Partial<DraftEnvelope<Workout>> = {}): DraftEnvelope<Workout> => ({ schemaVersion: 1, globalId: 'workout-a', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: workout(), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', deletedAt: null, originClientId: 'web_local_client', ...overrides });
@@ -17,4 +17,15 @@ describe('Studio plan draft dependencies', () => {
   it('classifies legacy draft, immutable, governed and ambiguous references deterministically', () => { expect(classifyLegacyDependency(placement({ workoutVersionId: 'workout-a_v1' }))).toBe('WORKOUT_DRAFT'); expect(classifyLegacyDependency(placement({ workoutVersionId: 'fixed-v1' }), new Set(['fixed-v1']))).toBe('PUBLISHED_WORKOUT_VERSION'); expect(classifyLegacyDependency(placement({ workoutVersionId: 'research:run:1' }))).toBe('GOVERNED_TEMPLATE'); expect(classifyLegacyDependency(placement({ workoutVersionId: 'unknown-version' }))).toBe('NEEDS_REVIEW'); });
   it('migrates unambiguous legacy draft references idempotently without publication', () => { const drafts = new Map([['workout-a', envelope()]]); const first = migrateLegacyPlanDraft({ ...plan(), schemaVersion: '1', dependencyKinds: undefined, dependencyOwnerHumanUserId: undefined, weeks: [{ ...plan().weeks[0], placements: [placement({ workoutVersionId: 'workout-a_v1' })] }] }, 'human-1', drafts); const second = migrateLegacyPlanDraft(first.plan, 'human-1', drafts); expect(second.plan).toEqual(first.plan); expect(first.classifications).toEqual(['WORKOUT_DRAFT']); expect(first.plan.schemaVersion).toBe(STUDIO_PLAN_DRAFT_SCHEMA); });
   it('requires complete immutable metadata for published dependencies', () => { const p = placement({ dependency: { kind: 'PUBLISHED_WORKOUT_VERSION', workoutGlobalId: 'w', versionId: 'v', revision: 1, checksum: '', schemaVersion: 'humanv1.canonical-workout/1', displayName: 'Fixed' } }); expect(validateDraftDependencies(plan(p), 'human-1', new Map())[0].state).toBe('INVALID'); });
+  it('classifies stored legacy plan states without mutating them', () => {
+    const planEnvelope: DraftEnvelope<Plan> = { ...envelope(), globalId: 'plan-1', payload: plan() };
+    const record = { schemaVersion: 'humanv1.studio-plan-draft-dependency/1' as const, dependencyId: 'plan-1__placement-1', humanUserId: 'human-1', planId: 'plan-1', placementId: 'placement-1',
+      dependencyKind: 'WORKOUT_DRAFT' as const, referencedStableId: 'workout-a', expectedRevision: 1, expectedUpdatedAt: null, immutableVersionId: null, immutableRevision: null,
+      immutableChecksum: null, immutableSchemaVersion: null, displayName: 'Workout', provenance: 'WORKOUT_STUDIO', revision: 1, createdAt: planEnvelope.createdAt,
+      updatedAt: planEnvelope.updatedAt, deletedAt: null };
+    expect(classifyLegacyPlan(planEnvelope, [record])).toBe('COMPLETE_AND_COMPATIBLE');
+    expect(classifyLegacyPlan(planEnvelope, [])).toBe('MISSING_NORMALIZED_DEPENDENCIES');
+    expect(classifyLegacyPlan(planEnvelope, [{ ...record, revision: 2 }])).toBe('STALE_DEPENDENCY_REVISION');
+    expect(classifyLegacyPlan({ ...planEnvelope, deletedAt: '2026-01-02' }, [record])).toBe('ARCHIVED_LEGACY_PLAN');
+  });
 });
