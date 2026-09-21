@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { triathlonResearchDataset, triathlonResearchPlans, type ResearchPlan } from "../../fixtures/triathlonResearchFixtures";
+import { buildPhaseTimeline, formatPhaseWeeks } from "../../domain/planPhaseTimeline";
 
 const disciplineFields = [["Swim", "swimMinutes"], ["Bike", "bikeMinutes"], ["Run", "runMinutes"], ["Strength", "strengthMinutes"], ["Multisport", "multisportMinutes"], ["Recovery", "recoveryMinutes"]] as const;
 export function TriathlonResearchLibrary({ onClone, mutationDisabled = false }: { onClone: (plan: ResearchPlan) => void | Promise<void>; mutationDisabled?: boolean }) {
@@ -7,6 +8,7 @@ export function TriathlonResearchLibrary({ onClone, mutationDisabled = false }: 
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const plan = triathlonResearchPlans.find(item => item.planId === selected)!;
+  const phaseTimeline = buildPhaseTimeline(plan, "RESEARCH_CANDIDATE");
   const totals = Object.fromEntries(disciplineFields.map(([label, field]) => [label, plan.weeks.reduce((sum, week) => sum + week[field], 0)]));
   return <section aria-labelledby="research-library-title" className="mt-10 border-t border-hv-border pt-6">
     <h2 id="research-library-title" className="text-xl font-bold">Triathlon research plans</h2>
@@ -15,7 +17,8 @@ export function TriathlonResearchLibrary({ onClone, mutationDisabled = false }: 
     <article className="mt-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4">
       <h3 className="font-semibold">{plan.name} — {plan.durationWeeks} weeks</h3>
       <h4 className="mt-3 font-medium">Prerequisites</h4><p className="text-sm text-hv-text-muted">{Array.isArray(plan.prerequisites) ? plan.prerequisites.join(" · ") : String(plan.prerequisites)}</p>
-      <h4 className="mt-3 font-medium">Phase timeline</h4><ol className="list-decimal pl-5 text-sm">{plan.phases.map(phase => <li key={phase.phaseId}>{phase.phaseName}: {phase.phaseObjective}</li>)}</ol>
+      <h4 className="mt-3 font-medium">Phase timeline</h4>
+      {phaseTimeline.unavailable ? <p className="text-sm text-hv-text-muted">Phase details unavailable</p> : <ol aria-label="Plan phase timeline" className="list-decimal pl-5 text-sm break-words">{phaseTimeline.entries.map(phase => <li key={phase.phaseId}><span className="font-medium">{phase.displayName}</span> — {formatPhaseWeeks(phase)}{phase.recovery ? " · Includes recovery" : ""}{phase.taper ? " · Taper" : ""}{phase.event ? " · Event" : ""}{phase.purpose ? <span className="block text-hv-text-muted">{phase.purpose}</span> : null}</li>)}</ol>}
       <h4 className="mt-3 font-medium">Discipline duration</h4><dl className="grid grid-cols-2 gap-x-3 text-sm">{disciplineFields.map(([label]) => <div key={label} className="contents"><dt>{label}</dt><dd>{totals[label]} minutes</dd></div>)}</dl>
       <p className="mt-3 text-sm">Recovery weeks: {plan.weeks.filter(week => week.recoveryWeek).map(week => week.weekNumber).join(", ") || "None marked"}. Required sessions: {plan.weeks.flatMap(w => w.days).flatMap(d => d.assignments).filter(a => a.required && a.assignmentType !== "RACE").length}. Optional sessions: {plan.weeks.flatMap(w => w.days).flatMap(d => d.assignments).filter(a => !a.required).length}.</p>
       <details className="mt-3"><summary>Weeks, multiple-session ordering and race placeholders</summary>{plan.weeks.map(week => <section key={week.weekNumber} aria-label={`Week ${week.weekNumber}`} className="mt-2"><h5 className="font-medium">Week {week.weekNumber} · {week.phaseName}{week.recoveryWeek ? " · Recovery" : ""}</h5><ul className="pl-5 text-sm">{week.days.filter(day => day.assignments.length).map(day => <li key={day.dayOfWeek}>{day.dayOfWeek}: {day.assignments.map(a => `${a.orderWithinDay}. ${a.sessionId}${a.assignmentType === "RACE" ? " (variable duration)" : ""}`).join("; ")}</li>)}</ul></section>)}</details>

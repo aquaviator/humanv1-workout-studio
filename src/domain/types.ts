@@ -165,6 +165,15 @@ export interface PlanWeek {
   placements: PlanPlacement[];
 }
 
+export interface PlanPhase {
+  phaseId: StableId;
+  name: string;
+  objective?: string;
+  order: number;
+  weekNumbers: number[];
+  source: "RESEARCH_CANDIDATE" | "CLONED_DRAFT" | "CANONICAL_PLAN" | "LEGACY_RECONSTRUCTION";
+}
+
 export interface Plan {
   schemaVersion: string;
   planId: StableId;
@@ -175,6 +184,7 @@ export interface Plan {
   timezone?: string;
   destinationApplication?: "HUMAN_STRENGTH";
   workoutVersionIds?: StableId[];
+  phases?: PlanPhase[];
   weeks: PlanWeek[];
   notes?: string;
   reconstructionDiagnostics?: ReconstructionDiagnostic[];
