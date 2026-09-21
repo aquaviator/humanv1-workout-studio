@@ -29,7 +29,12 @@ describe("TriathlonResearchLibrary", () => {
     await user.click(screen.getByText("Weeks, sessions and race placeholders"));
     expect(screen.getAllByText("Easy Aerobic Swim").length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText(/TUESDAY: Easy Aerobic Swim, 30 min/).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/TUESDAY: Easy Aerobic Swim, 30 min/)[0]).not.toHaveTextContent(/^1\./);
+    expect(screen.getAllByText(/Duration and discipline:/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Session ID: s_easy_30/)[0].parentElement).toHaveTextContent("Technical details — Session ID: s_easy_30");
     await user.click(screen.getByRole("tab", { name: "Intermediate Ironman" }));
-    expect(screen.getAllByLabelText(/session 1 of 2/).length).toBeGreaterThan(0);
+    const ordered = screen.getAllByLabelText(/session 1 of 2/);
+    expect(ordered.length).toBeGreaterThan(0);
+    expect(ordered[0]).toHaveTextContent(/^1\./);
   });
 });
