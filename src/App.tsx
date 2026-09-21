@@ -11,6 +11,8 @@ import { env } from "./config/env";
 import { crossAppRepository } from "./repositories/CrossAppRepository";
 import { syncManager } from "./repositories/SyncManager";
 import SyncActivityIndicator from "./ui/components/SyncActivityIndicator";
+import { AcceptanceModeBanner, AcceptanceModeProvider, useAcceptanceMode } from "./ui/components/AcceptanceModeProvider";
+import { isReadOnlyAcceptanceMode } from "./config/mutationPolicy";
 
 const WorkoutBuilder = React.lazy(() => import("./ui/pages/WorkoutBuilder"));
 const PlanBuilder = React.lazy(() => import("./ui/pages/PlanBuilder"));
@@ -26,6 +28,7 @@ const MyExercises = React.lazy(() => import("./ui/pages/MyExercises"));
 
 function Navigation() {
   const location = useLocation();
+  const { internalUrl } = useAcceptanceMode();
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/" },
     { icon: Dumbbell, label: "Workouts", path: "/workouts" },
@@ -48,7 +51,7 @@ function Navigation() {
           return (
             <Link
               key={item.path}
-              to={item.path}
+              to={internalUrl(item.path)}
               aria-label={item.label}
               className={cn(
                 "flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md transition-colors",
@@ -68,6 +71,8 @@ function Navigation() {
 }
 
 export default function App() {
+  // Capture the tab-scoped boundary before authentication/entitlement restoration.
+  isReadOnlyAcceptanceMode();
   const [identity, setIdentity] = useState<HumanIdentity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
@@ -89,6 +94,7 @@ export default function App() {
   useEffect(() => {
     if (!identity) return;
     const replay = () => {
+      if (isReadOnlyAcceptanceMode()) return;
       void crossAppRepository.replayPending(identity.humanUserId).catch(() => undefined);
       void syncManager.syncPending().catch(() => undefined);
     };
@@ -129,9 +135,11 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="flex h-screen bg-hv-bg text-hv-text overflow-hidden">
-        <Navigation />
-        <main className="flex-1 overflow-y-auto relative">
+      <AcceptanceModeProvider>
+        <div className="flex h-screen bg-hv-bg text-hv-text overflow-hidden">
+          <Navigation />
+          <main className="flex-1 overflow-y-auto relative">
+          <AcceptanceModeBanner />
           <SyncActivityIndicator identity={identity} />
           <Suspense fallback={<div className="p-8 text-hv-text-muted">Loading...</div>}>
             <Routes>
@@ -150,8 +158,9 @@ export default function App() {
               <Route path="/account" element={<AccountSettings identity={identity} />} />
             </Routes>
           </Suspense>
-        </main>
-      </div>
+          </main>
+        </div>
+      </AcceptanceModeProvider>
     </BrowserRouter>
   );
 }

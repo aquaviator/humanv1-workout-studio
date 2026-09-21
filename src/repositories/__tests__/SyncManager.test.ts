@@ -35,7 +35,20 @@ const envelope: PublishedEnvelope<Workout> = {
 };
 
 describe('SyncManager publication replay', () => {
-  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; state.uploaded.length = 0; state.callableInputs.length = 0; state.callableFailure = null; Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
+  beforeEach(() => { state.values.clear(); state.transactionFailure = null; state.transactionCount = 0; state.uploaded.length = 0; state.callableInputs.length = 0; state.callableFailure = null; sessionStorage.clear(); window.history.replaceState({}, '', '/'); Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
+
+  it('does not create or replay queues or invoke the plan callable in read-only acceptance', async () => {
+    window.history.replaceState({}, '', '/plans?acceptance=read-only');
+    state.values.set('sync_human-1_plan_plan-1', { envelope: { ...envelope, globalId: 'plan-1' }, syncType: 'draft', status: 'QUEUED', type: 'plan', planSave: { planId: 'plan-1' } });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    const manager = new SyncManager();
+    (manager as unknown as { isOnline: boolean }).isOnline = true;
+    await manager.syncPending();
+    await expect(manager.queueUpload(envelope, 'workout', 'publication')).rejects.toThrow('READ_ONLY_ACCEPTANCE_MUTATION_BLOCKED');
+    expect(state.callableInputs).toHaveLength(0);
+    expect(state.transactionCount).toBe(0);
+    expect((await manager.listSyncRecords('human-1', 'plan'))[0].status).toBe('QUEUED');
+  });
 
   it('durably queues offline and a reconstructed manager sees the queue', async () => {
     const manager = new SyncManager();

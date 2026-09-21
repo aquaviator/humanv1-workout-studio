@@ -8,6 +8,7 @@ vi.mock('idb-keyval', () => ({
   keys: vi.fn(() => Promise.resolve([...state.values.keys()])),
 }));
 vi.mock('../SyncManager', () => ({ syncManager: { queueUpload: state.queued } }));
+vi.mock('../AuthManager', () => ({ authRepository: { getCurrentIdentity: vi.fn() } }));
 
 import { PublicationRepository } from '../PublicationRepository';
 
@@ -19,7 +20,15 @@ const workout = (): Workout => ({
 });
 
 describe('PublicationRepository', () => {
-  beforeEach(() => { state.values.clear(); state.queued.mockClear(); });
+  beforeEach(() => { state.values.clear(); state.queued.mockClear(); sessionStorage.clear(); window.history.replaceState({}, '', '/'); });
+
+  it('rejects direct publication before creating a local version or queue item in read-only acceptance', async () => {
+    window.history.replaceState({}, '', '/workouts/workout-1?acceptance=read-only');
+    const repository = new PublicationRepository();
+    await expect(repository.publish('human-1', 'workout', 'workout-1', workout())).rejects.toThrow('READ_ONLY_ACCEPTANCE_MUTATION_BLOCKED:publish:workout');
+    expect(state.values.size).toBe(0);
+    expect(state.queued).not.toHaveBeenCalled();
+  });
 
   it('canonicalizes keys and republishes unchanged content idempotently', async () => {
     const repository = new PublicationRepository();

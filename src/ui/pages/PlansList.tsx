@@ -39,7 +39,6 @@ export default function PlansList({ identity }: { identity: HumanIdentity }) {
           </article>
         ))}
       </div>
-      {readOnlyAcceptance && <p className="mt-10 rounded border border-hv-border p-4 text-sm text-hv-text-muted">Read-only acceptance mode: creation and publication controls are unavailable.</p>}
       <TriathlonResearchLibrary mutationDisabled={readOnlyAcceptance} onClone={async source => { const draft = cloneResearchPlanToDraft(source, identity.humanUserId); const existing = await draftRepository.getPlanDraft(identity.humanUserId, draft.planId); if (!existing) await draftRepository.savePlanDraft(identity.humanUserId, draft); navigate(`/plans/${draft.planId}`); }} />
     </div>
   );

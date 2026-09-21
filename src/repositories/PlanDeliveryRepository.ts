@@ -1,5 +1,6 @@
 import { get, set } from 'idb-keyval';
 import type { PublicationDiagnostic } from '../domain/publicationDiagnostics';
+import { assertMutationAllowed } from '../config/mutationPolicy';
 
 export type PlanDeliveryPhase =
   | 'VALIDATING'
@@ -36,6 +37,7 @@ export class PlanDeliveryRepository {
   }
 
   async save(attempt: PlanDeliveryAttempt): Promise<void> {
+    assertMutationAllowed('savePlanDeliveryAttempt');
     await set(keyFor(attempt.humanUserId, attempt.planId), attempt);
   }
 }

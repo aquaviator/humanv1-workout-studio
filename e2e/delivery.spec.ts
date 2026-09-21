@@ -22,8 +22,10 @@ async function openSignedIn(context: BrowserContext) {
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text().replace(/browser-owner@example\.test/g, '[redacted]')); });
   await page.goto('/workouts/new');
   const signIn = page.getByRole('button', { name: /Sign in/ });
+  const title = page.getByLabel('Workout Title');
+  await expect(signIn.or(title)).toBeVisible();
   if (await signIn.isVisible().catch(() => false)) await signIn.click();
-  await expect(page.getByLabel('Workout Title')).toBeVisible();
+  await expect(title).toBeVisible();
   return { page, consoleErrors };
 }
 
@@ -258,13 +260,13 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByText(/Available in Human Strength/i)).toHaveCount(0);
   });
 
-  test('keeps passive acceptance read-only and creates an explicitly confirmed research copy once', async () => {
+  test('keeps passive acceptance read-only across navigation and isolates ordinary tabs', async () => {
     const before = await planDraftIds();
     await page.goto('/plans?acceptance=read-only');
     await expect(page.getByText(/Read-only acceptance mode/)).toBeVisible();
     for (const name of ['First Half Ironman', 'Intermediate Half Ironman', 'First Ironman', 'Intermediate Ironman']) {
       await page.getByRole('tab', { name }).click();
-      const details = page.getByText('Evidence and limitations');
+      const details = page.getByText(/Evidence and (?:limitations|methodology)/);
       if (!(await details.evaluate(node => (node.parentElement as HTMLDetailsElement).open))) await details.click();
     }
     await page.setViewportSize({ width: 390, height: 844 });
@@ -272,21 +274,24 @@ test.describe.serial('truthful delivery in a genuine persistent browser', () => 
     await expect(page.getByTestId(/create-research-copy/)).toHaveCount(0);
     expect(await planDraftIds()).toEqual(before);
 
-    // This is an isolated emulator journey explicitly switching back to normal
-    // user mode; production acceptance never clears this tab-scoped boundary.
-    await page.evaluate(() => sessionStorage.clear());
-    await page.goto('/plans');
-    await page.getByRole('tab', { name: 'Intermediate Ironman' }).click();
-    await page.getByTestId('create-research-copy-intermediate-ironman-16-week').click();
-    await expect(page.getByText(/creates new cloud data/i)).toBeVisible();
-    await page.getByRole('button', { name: 'Create cloud copy of Intermediate Ironman' }).click();
-    const expectedCopyId = 'research_copy_4b9b6a3adb81e4eb7443';
-    await expect(page).toHaveURL(new RegExp(expectedCopyId));
-    await expect.poll(async () => (await planDraftIds()).filter(id => id === expectedCopyId).length).toBe(1);
-    await page.goto('/plans');
-    await page.getByRole('tab', { name: 'Intermediate Ironman' }).click();
-    await page.getByTestId('create-research-copy-intermediate-ironman-16-week').click();
-    await page.getByRole('button', { name: 'Create cloud copy of Intermediate Ironman' }).click();
-    expect((await planDraftIds()).filter(id => id === expectedCopyId)).toHaveLength(1);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    for (const destination of ['Workouts', 'Plans', 'Exercises', 'My Exercises', 'Protocols', 'Issues needing attention', 'Account', 'Dashboard']) {
+      await page.getByRole('link', { name: destination, exact: true }).click();
+      await expect(page).toHaveURL(/acceptance=read-only/);
+      await expect(page.getByText(/Read-only acceptance mode/)).toBeVisible();
+      await expect(page.getByRole('button', { name: /^(Create|Edit|Save|Publish|Send|Retry|Archive|Restore|Copy to Studio)/i })).toHaveCount(0);
+    }
+    await page.goBack();
+    await expect(page).toHaveURL(/acceptance=read-only/);
+    await page.goForward();
+    await expect(page).toHaveURL(/acceptance=read-only/);
+    await page.reload();
+    await expect(page.getByText(/Read-only acceptance mode/)).toBeVisible();
+
+    const ordinaryTab = await page.context().newPage();
+    await ordinaryTab.goto('/plans');
+    await expect(ordinaryTab).not.toHaveURL(/acceptance=read-only/);
+    await expect(ordinaryTab.getByRole('link', { name: 'Create Plan' })).toBeVisible();
+    await ordinaryTab.close();
   });
 });

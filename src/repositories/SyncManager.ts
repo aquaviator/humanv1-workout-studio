@@ -175,6 +175,7 @@ export class SyncManager {
         const syncRecord = await get<SyncRecord>(syncKey);
 
         if (syncRecord?.status === 'QUEUED' || syncRecord?.status === 'FAILED' || syncRecord?.status === 'SENDING') {
+          if (isReadOnlyAcceptanceMode()) continue;
           if (remoteData.revision >= syncRecord.envelope.revision) {
             syncRecord.status = 'NEEDS_USER_REVIEW';
             syncRecord.lastErrorCode = 'REMOTE_CHANGED_WHILE_LOCAL_PENDING';
@@ -336,6 +337,7 @@ export class SyncManager {
   }
 
   async resolveWithRemote(humanUserId: string, record: SyncRecord): Promise<void> {
+    assertMutationAllowed('resolveWithRemote');
     const remote = await getDoc(doc(db, 'users', humanUserId, `${record.type}Drafts`, record.envelope.globalId));
     const localKey = `drafts_${humanUserId}_${record.type}_${record.envelope.globalId}`;
     await set(`sync_audit_${humanUserId}_${record.type}_${record.envelope.globalId}_${Date.now()}`, {
@@ -351,6 +353,7 @@ export class SyncManager {
   }
 
   async resolveWithLocal(humanUserId: string, record: SyncRecord): Promise<void> {
+    assertMutationAllowed('resolveWithLocal');
     const remote = await getDoc(doc(db, 'users', humanUserId, `${record.type}Drafts`, record.envelope.globalId));
     const remoteData = remote.exists() ? remote.data() : null;
     if (remoteData && remoteData.humanUserId !== humanUserId) throw new Error('OWNERSHIP_CONFLICT');

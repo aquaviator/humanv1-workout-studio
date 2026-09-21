@@ -8,6 +8,7 @@ import { validateWorkoutForPublication } from '../domain/validation/workoutValid
 import { syncManager } from './SyncManager';
 import { authRepository } from './AuthManager';
 import { diagnosticForWorkoutValidation, PublicationDiagnosticError } from '../domain/publicationDiagnostics';
+import { assertMutationAllowed } from '../config/mutationPolicy';
 
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -33,6 +34,7 @@ export class PublicationRepository {
   }
 
   async publish<T extends PublishableContent>(trustedHumanUserId: string, contentType: ContentType, globalId: string, payload: T, _compatibleTags?: readonly string[], suppliedTimeline?: CompiledProtocolStep[]): Promise<PublishedEnvelope<T>> {
+    assertMutationAllowed(`publish:${contentType}`);
     const actualId = contentType === 'workout' ? (payload as Workout).workoutId : contentType === 'plan' ? (payload as Plan).planId : (payload as Protocol).protocolId;
     if (actualId !== globalId) throw new Error('CONTENT_ID_MISMATCH');
     const errors = contentType === 'workout' ? validateWorkoutForPublication(payload as Workout, []) : contentType === 'plan' ? validatePlan(payload as Plan) : validateProtocol(payload as Protocol);
