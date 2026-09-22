@@ -12,6 +12,7 @@ import WorkoutBuilder from '../WorkoutBuilder';
 import ProtocolBuilder from '../ProtocolBuilder';
 import PlanBuilder from '../PlanBuilder';
 import { HumanIdentity } from '../../../domain/identity';
+import { AcceptanceModeProvider } from '../../components/AcceptanceModeProvider';
 
 const mockIdentity: HumanIdentity = {
   humanUserId: 'test-user',
@@ -187,6 +188,51 @@ describe('Acceptance Criteria', () => {
   });
 
   describe('PlanBuilder', () => {
+    afterEach(() => {
+      window.history.replaceState({}, '', '/plans');
+      sessionStorage.removeItem('humanv1.acceptance.read-only.v1');
+    });
+
+    it('presents the plan editor with native read-only semantics and no mutation surfaces in acceptance mode', async () => {
+      window.history.replaceState({}, '', '/plans/plan_two_week_fixture?acceptance=read-only');
+      vi.mocked(draftRepository.savePlanDraft).mockClear();
+      const { container } = render(
+        <MemoryRouter initialEntries={['/plans/plan_two_week_fixture?acceptance=read-only']}>
+          <AcceptanceModeProvider>
+            <Routes><Route path="/plans/:planId" element={<PlanBuilder identity={mockIdentity} />} /></Routes>
+          </AcceptanceModeProvider>
+        </MemoryRouter>
+      );
+      await screen.findByRole('heading', { name: 'Two-Week Hybrid Fixture' });
+      expect(screen.queryByRole('textbox', { name: 'Plan Title' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: 'Plan Description' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add Week' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Send plan to my apps' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Remove workout' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Add workout to day' })).not.toBeInTheDocument();
+      expect(container.querySelector('[draggable="true"], [data-rfd-drag-handle-draggable-id]')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Foundation' })).toBeEnabled();
+      await new Promise(resolve => setTimeout(resolve, 650));
+      expect(draftRepository.savePlanDraft).not.toHaveBeenCalled();
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it('preserves ordinary writable plan-authoring controls', async () => {
+      window.history.replaceState({}, '', '/plans/plan_two_week_fixture');
+      const { container } = render(
+        <MemoryRouter initialEntries={['/plans/plan_two_week_fixture']}>
+          <Routes><Route path="/plans/:planId" element={<PlanBuilder identity={mockIdentity} />} /></Routes>
+        </MemoryRouter>
+      );
+      await screen.findByDisplayValue('Two-Week Hybrid Fixture');
+      expect(screen.getByRole('textbox', { name: 'Plan Title' })).not.toHaveAttribute('readonly');
+      expect(screen.getByRole('textbox', { name: 'Plan Description' })).not.toHaveAttribute('readonly');
+      expect(screen.getByRole('button', { name: 'Add Week' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Send plan to my apps' })).toBeInTheDocument();
+      expect(screen.getAllByRole('combobox', { name: 'Add workout to day' }).length).toBeGreaterThan(0);
+      expect(container.querySelector('[data-rfd-drag-handle-draggable-id]')).not.toBeNull();
+    });
+
     it('has no basic accessibility violations', async () => {
       const { container } = render(<MemoryRouter><PlanBuilder identity={mockIdentity} /></MemoryRouter>);
       const results = await axe(container);

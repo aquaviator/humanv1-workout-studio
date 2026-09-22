@@ -24,8 +24,11 @@ import { PublicationDiagnosticError, transientPublicationDiagnostic, validatePla
 import type { DraftEnvelope } from "../../repositories/DraftRepository";
 import { dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, validateDraftDependencies, workoutDraftDependency } from "../../domain/planDraftDependencies";
 import { governedPublicationRepository } from "../../repositories/GovernedPublicationRepository";
+import { useAcceptanceMode } from "../components/AcceptanceModeProvider";
+import { assertMutationAllowed } from "../../config/mutationPolicy";
 
 export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
+  const { isReadOnlyAcceptance } = useAcceptanceMode();
   const { planId: routePlanId } = useParams<{ planId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -99,6 +102,10 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
   useEffect(() => {
     if (isLoading) return;
+    if (isReadOnlyAcceptance) {
+      setSaveStatus("Saved on this device");
+      return;
+    }
     if (validationErrors.length > 0) {
       setSaveStatus("Needs attention");
       return;
@@ -110,7 +117,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       draftRepository.savePlanDraft(identity.humanUserId, normalized).then(() => setSaveStatus("Saved on this device")).catch(() => setSaveStatus("Needs attention"));
     }, 500);
     return () => clearTimeout(timeout);
-  }, [plan, identity.humanUserId, isLoading, validationErrors.length]);
+  }, [plan, identity.humanUserId, isLoading, validationErrors.length, isReadOnlyAcceptance]);
 
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
@@ -211,6 +218,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
 
 
   const handlePublish = async () => {
+    assertMutationAllowed("publishPlan");
     try {
       setPublishStatus("");
       await recordDelivery('VALIDATING');
@@ -257,6 +265,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
 
   const handleOpenPublish = async () => {
+      assertMutationAllowed("openPlanPublication");
       const deps: Workout[] = [];
       const changed: Workout[] = [];
       const reused: Workout[] = [];
@@ -279,6 +288,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
 
   const addWeek = () => {
+    assertMutationAllowed("addPlanWeek");
     const newWeekIndex = plan.weeks.length;
     const newWeek = {
       weekId: uuidv4(),
@@ -298,6 +308,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const withDependencyMetadata = (next: Plan): Plan => migrateLegacyPlanDraft(next, identity.humanUserId, workoutDrafts).plan;
 
   const removeCurrentWeek = () => {
+    assertMutationAllowed("removePlanWeek");
     if (plan.weeks.length <= 1) return;
     const updatedWeeks = plan.weeks.filter((_, idx) => idx !== activeWeekIndex);
     // Re-number weeks
@@ -307,6 +318,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
 
   const onDragEnd = (result: DropResult) => {
+    assertMutationAllowed("reorderPlan");
     const { source, destination } = result;
     if (!destination) return;
 
@@ -353,6 +365,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
 
   const removePlacement = (placementId: string) => {
+    assertMutationAllowed("removePlanPlacement");
     const updatedWeeks = [...plan.weeks];
     updatedWeeks[activeWeekIndex] = {
       ...updatedWeeks[activeWeekIndex],
@@ -362,6 +375,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   };
   
   const addWorkoutToDay = (workoutId: string, dayOfWeek: number) => {
+    assertMutationAllowed("addPlanPlacement");
     const newPlacement = {
       placementId: uuidv4(),
       dayOfWeek,
@@ -383,34 +397,34 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     <div className="flex flex-col h-full">
       <div className="p-4 md:p-8 pb-4 flex flex-col md:flex-row justify-between md:items-center border-b border-hv-border gap-4">
         <div>
-          <input
+          {isReadOnlyAcceptance ? <h1 className="text-2xl font-bold py-1">{plan.title}</h1> : <input
             type="text"
             className="text-2xl font-bold bg-transparent border-b border-transparent hover:border-hv-border focus:border-hv-primary focus:outline-none py-1 w-full"
             value={plan.title}
             onChange={(e) => setPlan({ ...plan, title: e.target.value })}
             aria-label="Plan Title"
-          />
-          <input
+          />}
+          {isReadOnlyAcceptance ? <p className="mt-1 text-hv-text-muted">{plan.description || "No description provided."}</p> : <input
             type="text"
             className="text-hv-text-muted mt-1 bg-transparent border-b border-transparent hover:border-hv-border focus:border-hv-primary focus:outline-none w-full"
             value={plan.description || ""}
             onChange={(e) => setPlan({ ...plan, description: e.target.value })}
             placeholder="Add description"
             aria-label="Plan Description"
-          />
+          />}
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
           <span className="text-xs text-hv-text-muted hidden md:inline-block">{saveStatus}</span>
-          <button onClick={undo} disabled={!canUndo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Undo">
+          {!isReadOnlyAcceptance && <button onClick={undo} disabled={!canUndo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Undo">
             <Undo2 className="w-5 h-5" />
-          </button>
-          <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
+          </button>}
+          {!isReadOnlyAcceptance && <button onClick={redo} disabled={!canRedo} className="p-2 text-hv-text-muted hover:text-hv-text disabled:opacity-50" aria-label="Redo">
             <Redo2 className="w-5 h-5" />
-          </button>
-          <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} aria-describedby={publicationReason ? "plan-publication-reason" : undefined} title={validationErrors[0]?.message ?? dependencyIssues[0]?.message} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          </button>}
+          {!isReadOnlyAcceptance && <button onClick={handleOpenPublish} disabled={validationErrors.length > 0} aria-describedby={publicationReason ? "plan-publication-reason" : undefined} title={validationErrors[0]?.message ?? dependencyIssues[0]?.message} className="bg-hv-primary text-hv-background px-4 py-2 rounded-md font-medium hover:bg-hv-primary-hover flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
             <Send className="w-4 h-4" /> Send plan to my apps
-          </button>
-      {isPublishModalOpen && (
+          </button>}
+      {!isReadOnlyAcceptance && isPublishModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-hv-surface-1 p-6 rounded-xl max-w-md w-full shadow-2xl">
             <h2 className="text-xl font-bold mb-4 text-hv-text">Send plan to my apps</h2>
@@ -469,8 +483,8 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
         <section className="mx-4 md:mx-8 mt-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4" aria-live="polite" aria-label="Plan delivery status">
           <h2 className="font-semibold text-hv-text">{displayPublishStatus}</h2>
           <p className="mt-1 text-sm text-hv-text-muted">Destination: Human Strength</p>
-          {deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.retryEligibility === 'RETRYABLE' && <button onClick={handlePublish} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Retry</button>}
-          {deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.userCorrectableInStudio && deliveryAttempt.diagnostic.entityType === 'workout' && <button onClick={() => navigate(`/workouts/${deliveryAttempt.diagnostic!.entityId}`)} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Review workout</button>}
+          {!isReadOnlyAcceptance && deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.retryEligibility === 'RETRYABLE' && <button onClick={handlePublish} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Retry</button>}
+          {!isReadOnlyAcceptance && deliveryAttempt.phase === 'FAILED' && deliveryAttempt.diagnostic?.userCorrectableInStudio && deliveryAttempt.diagnostic.entityType === 'workout' && <button onClick={() => navigate(`/workouts/${deliveryAttempt.diagnostic!.entityId}`)} className="mt-3 px-3 py-2 rounded bg-hv-primary text-hv-background font-medium">Review workout</button>}
           <details className="mt-3 text-xs text-hv-text-muted">
             <summary className="cursor-pointer">Delivery details</summary>
             <dl className="mt-2 break-all"><dt>Plan ID</dt><dd>{deliveryAttempt.planId}</dd>{deliveryAttempt.planVersionId && <><dt>Immutable version</dt><dd>{deliveryAttempt.planVersionId}</dd></>}<dt>Phase</dt><dd>{deliveryAttempt.phase}</dd>{deliveryAttempt.diagnostic && <><dt>Error code</dt><dd>{deliveryAttempt.diagnostic.errorCode}</dd><dt>Entity</dt><dd>{deliveryAttempt.diagnostic.entityType}: {deliveryAttempt.diagnostic.displayName}</dd><dt>Field</dt><dd>{deliveryAttempt.diagnostic.fieldPath}</dd><dt>Rule</dt><dd>{deliveryAttempt.diagnostic.validationRule}</dd><dt>Next step</dt><dd>{deliveryAttempt.diagnostic.explanation}</dd></>}<dt>Last attempted</dt><dd>{deliveryAttempt.lastAttemptedAt}</dd></dl>
@@ -493,14 +507,14 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
               {week.label}
             </button>
           ))}
-          <button 
+          {!isReadOnlyAcceptance && <button
             onClick={addWeek}
             className="px-3 py-1 text-sm font-medium rounded-full border border-hv-border hover:bg-hv-surface-2 transition-colors flex items-center gap-1"
           >
             <Plus className="w-3 h-3" /> Add Week
-          </button>
+          </button>}
         </div>
-        {plan.weeks.length > 1 && (
+        {!isReadOnlyAcceptance && plan.weeks.length > 1 && (
           <button 
             onClick={removeCurrentWeek}
             className="text-xs text-hv-error hover:underline flex items-center gap-1"
@@ -512,7 +526,43 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       
 
       
-      <DragDropContext onDragEnd={onDragEnd}>
+      {isReadOnlyAcceptance ? (
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden" data-testid="read-only-plan-schedule">
+          <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+            <div className="grid grid-cols-1 gap-4 pb-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+              {days.map(day => {
+                const dayOfWeekNumber = day.getDay() === 0 ? 7 : day.getDay();
+                const placements = plan.weeks[activeWeekIndex].placements.filter(item => item.dayOfWeek === dayOfWeekNumber);
+                return (
+                  <section key={day.toISOString()} className="min-w-0 rounded-lg border border-hv-border bg-hv-surface-1" aria-label={`${format(day, "EEEE")} schedule`}>
+                    <header className="border-b border-hv-border bg-hv-surface-2 p-3 text-center">
+                      <div className="text-xs font-semibold uppercase text-hv-text-muted">{format(day, "EEE")}</div>
+                      <div className="text-lg font-bold">{format(day, "d")}</div>
+                    </header>
+                    <div className="min-h-24 space-y-2 p-2">
+                      {placements.map(placement => {
+                        const workout = availableWorkouts.find(item => item.workoutId === placement.workoutId);
+                        return <article key={placement.placementId} className="rounded-md border border-hv-border bg-hv-bg p-3 text-sm">
+                          <div className="font-semibold">{workout?.title || "Workout unavailable"}</div>
+                          <div className="text-xs text-hv-text-muted">{workout?.discipline || "Reconstructed placement"}</div>
+                          {placement.dependency?.kind === "WORKOUT_DRAFT" && <div className="mt-1 text-xs text-hv-primary">{dependencyHasUnpublishedChanges(placement.dependency, workoutDrafts) ? "Workout has unpublished changes" : "Draft"}</div>}
+                        </article>;
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+          <aside className="w-full border-t border-hv-border bg-hv-surface-1 p-4 md:w-80 md:border-l md:border-t-0" aria-label="Workout library">
+            <h2 className="mb-4 font-bold">Library</h2>
+            <p className="mb-3 text-xs text-hv-text-muted">Available workouts are shown for reference.</p>
+            <div className="space-y-2">{availableWorkouts.map(workout => <article key={workout.workoutId} className="rounded-md border border-hv-border bg-hv-bg p-3">
+              <div className="text-sm font-semibold">{workout.title}</div><div className="text-xs text-hv-text-muted">{workout.discipline}</div>
+            </article>)}</div>
+          </aside>
+        </div>
+      ) : <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* Calendar Grid */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto">
@@ -528,7 +578,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                       <div className="text-lg font-bold">{format(day, 'd')}</div>
                     </div>
                     
-                    <Droppable droppableId={`day-${dayOfWeekNumber}`}>
+                    <Droppable droppableId={`day-${dayOfWeekNumber}`} isDropDisabled={isReadOnlyAcceptance}>
                       {(provided) => (
                         <div
                           ref={provided.innerRef}
@@ -540,19 +590,19 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                             const unresolved = (plan.reconstructionDiagnostics ?? []).some(item => item.severity === "blocking" && (item.referenceId ? item.referenceId === p.workoutId : !p.workoutId));
                             
                             return (
-                              <Draggable key={p.placementId} draggableId={p.placementId} index={pIdx} isDragDisabled={unresolved}>
+                              <Draggable key={p.placementId} draggableId={p.placementId} index={pIdx} isDragDisabled={isReadOnlyAcceptance || unresolved}>
                                 {(provided) => (
                                   <div
                                     ref={provided.innerRef}
-                                    {...provided.draggableProps}
-                                    {...provided.dragHandleProps}
+                                    {...(!isReadOnlyAcceptance ? provided.draggableProps : {})}
+                                    {...(!isReadOnlyAcceptance ? provided.dragHandleProps : {})}
                                     className="bg-hv-bg border border-hv-border p-3 rounded-md text-sm group relative"
                                   >
                                     <div className="font-semibold mb-1 line-clamp-1 pr-6">{workout?.title || "Workout unavailable"}</div>
                                     <div className="text-xs text-hv-text-muted">{workout?.discipline || "Reconstructed placement"}</div>
                                     {p.dependency?.kind === 'WORKOUT_DRAFT' && <div className="mt-1 text-xs text-hv-primary">{dependencyHasUnpublishedChanges(p.dependency, workoutDrafts) ? 'Workout has unpublished changes' : 'Draft'}</div>}
                                     <PlacementReconstructionStatus placement={p} weekLabel={plan.weeks[activeWeekIndex].label} dayLabel={format(day, 'EEEE')} workout={workout} diagnostics={plan.reconstructionDiagnostics ?? []} />
-                                    <button 
+                                    {!isReadOnlyAcceptance && <button
                                       onClick={() => removePlacement(p.placementId)}
                                       disabled={unresolved}
                                       title={unresolved ? "Resolve the workout reference before removing this placement" : undefined}
@@ -560,7 +610,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                                       aria-label="Remove workout"
                                     >
                                       <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    </button>}
                                   </div>
                                 )}
                               </Draggable>
@@ -590,16 +640,16 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                       </div>
                     )}
                     {availableWorkouts.map((workout, index) => (
-                      <Draggable key={workout.workoutId} draggableId={workout.workoutId} index={index}>
+                      <Draggable key={workout.workoutId} draggableId={workout.workoutId} index={index} isDragDisabled={isReadOnlyAcceptance}>
                         {(provided) => (
                           <div
                             ref={provided.innerRef}
-                            {...provided.draggableProps}
+                            {...(!isReadOnlyAcceptance ? provided.draggableProps : {})}
                             className="bg-hv-bg border border-hv-border p-3 rounded-md mb-2 flex items-center justify-between gap-3 group"
                           >
                             <div 
-                              {...provided.dragHandleProps} 
-                              className="flex-1 flex items-center gap-3 cursor-grab"
+                              {...(!isReadOnlyAcceptance ? provided.dragHandleProps : {})}
+                              className={`flex-1 flex items-center gap-3 ${isReadOnlyAcceptance ? "" : "cursor-grab"}`}
                             >
                               <Dumbbell className="w-4 h-4 text-hv-text-muted hidden md:block" />
                               <div>
@@ -608,7 +658,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                               </div>
                             </div>
                             
-                            <div className="flex gap-1 items-center">
+                            {!isReadOnlyAcceptance && <div className="flex gap-1 items-center">
                               <select 
                                 onChange={(e) => {
                                   if (e.target.value) {
@@ -628,7 +678,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
                                 <option value="6">Saturday</option>
                                 <option value="7">Sunday</option>
                               </select>
-                            </div>
+                            </div>}
                           </div>
                         )}
                       </Draggable>
@@ -640,7 +690,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
             </div>
           </div>
         </div>
-      </DragDropContext>
+      </DragDropContext>}
     </div>
   );
 }
