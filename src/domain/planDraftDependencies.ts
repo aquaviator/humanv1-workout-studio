@@ -1,11 +1,28 @@
 import type { DraftEnvelope } from "../repositories/DraftRepository";
 import type { Plan, PlanDraftDependency, PlanDraftDependencyRecord, PlanPlacement, Workout } from "./types";
 import { validateWorkoutForPublication } from "./validation/workoutValidation";
+import { canonicalJson } from "./canonical";
 
 export const STUDIO_PLAN_DRAFT_SCHEMA = "humanv1.studio-plan-draft/1" as const;
 export const STUDIO_PLAN_DRAFT_DEPENDENCY_SCHEMA = "humanv1.studio-plan-draft-dependency/1" as const;
 
 export const planDependencyId = (planId: string, placementId: string) => `${planId}__${placementId}`;
+
+export const planDraftSemanticPlan = (plan: Plan): string => {
+  const value = structuredClone(plan);
+  for (const week of value.weeks) for (const placement of week.placements) {
+    if (placement.dependency?.kind === "WORKOUT_DRAFT") delete placement.dependency.expectedUpdatedAt;
+  }
+  return canonicalJson(value);
+};
+
+export const planDraftSemanticDependency = (record: PlanDraftDependencyRecord): string => canonicalJson({
+  dependencyId: record.dependencyId, placementId: record.placementId, dependencyKind: record.dependencyKind,
+  referencedStableId: record.referencedStableId, expectedRevision: record.expectedRevision,
+  immutableVersionId: record.immutableVersionId, immutableRevision: record.immutableRevision,
+  immutableChecksum: record.immutableChecksum, immutableSchemaVersion: record.immutableSchemaVersion,
+  displayName: record.displayName, provenance: record.provenance,
+});
 
 export function normalizePlanDependencyRecords(plan: Plan, owner: string, revision: number, createdAt: string, updatedAt: string): PlanDraftDependencyRecord[] {
   const records: PlanDraftDependencyRecord[] = [];

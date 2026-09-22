@@ -3,6 +3,9 @@ import { Workout, Plan, Protocol } from '../domain/types';
 import { syncManager } from './SyncManager';
 import { assertMutationAllowed } from '../config/mutationPolicy';
 import { normalizePlanDependencyRecords } from '../domain/planDraftDependencies';
+import type { PlanDraftDependencyRecord } from '../domain/types';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 export interface DraftEnvelope<T> {
   schemaVersion: number;
@@ -121,6 +124,12 @@ export class DraftRepository {
 
   async getPlanEnvelope(userId: string, planId: string): Promise<DraftEnvelope<Plan> | null> {
     return (await get<DraftEnvelope<Plan>>(this.getStoreKey(userId, 'plan', planId))) ?? null;
+  }
+
+  async listPlanDependencyRecords(userId: string, planId: string): Promise<PlanDraftDependencyRecord[]> {
+    const snapshot = await getDocs(query(collection(db, 'users', userId, 'planDraftDependencies'), where('planId', '==', planId)));
+    return snapshot.docs.map(item => item.data() as PlanDraftDependencyRecord)
+      .filter(item => item.humanUserId === userId && item.planId === planId);
   }
 
   async listPlanDrafts(userId: string): Promise<Plan[]> {

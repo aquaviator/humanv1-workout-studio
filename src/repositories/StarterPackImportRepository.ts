@@ -9,6 +9,7 @@ import { registeredStarterPacks } from "../fixtures/representativeStarterPack";
 import { governedWorkoutImportAdapter, type GovernedWorkoutImportAdapter } from "./GovernedWorkoutImportAdapter";
 import { draftRepository, type DraftEnvelope, type DraftRepository } from "./DraftRepository";
 import { syncManager, type SyncManager } from "./SyncManager";
+import { normalizePlanDependencyRecords, planDraftSemanticDependency, planDraftSemanticPlan } from "../domain/planDraftDependencies";
 
 export type StarterPackImportPhase = "CHECKING_LIBRARY" | "ADDING_WORKOUTS" | "CREATING_PLAN" | "ADDED" | "ALREADY_ADDED" | "NEEDS_ATTENTION";
 export interface StarterPackOperationState {
@@ -33,7 +34,7 @@ export interface StarterPackImportResult { state: StarterPackOperationState; cre
 
 export interface ImportDependencies {
   importer: Pick<GovernedWorkoutImportAdapter, "dryRun" | "apply">;
-  drafts: Pick<DraftRepository, "listWorkoutEnvelopes" | "getPlanEnvelope" | "savePlanDraft">;
+  drafts: Pick<DraftRepository, "listWorkoutEnvelopes" | "getPlanEnvelope" | "listPlanDependencyRecords" | "savePlanDraft">;
   sync: Pick<SyncManager, "syncDown" | "syncPending" | "listSyncRecords">;
   readState: (key: string) => Promise<StarterPackOperationState | undefined>;
   writeState: (key: string, state: StarterPackOperationState) => Promise<void>;
@@ -149,9 +150,19 @@ export class StarterPackImportRepository {
       const plan = buildPlan(pack, owner, workoutBySemanticKey, state.selectedStartDate);
       const existingPlan = await this.dependencies.drafts.getPlanEnvelope(owner, plan.planId);
       if (existingPlan && !existingPlan.deletedAt) {
-        if (canonicalJson(existingPlan.payload) !== canonicalJson(plan)) throw new Error(`STARTER_PACK_PLAN_CONFLICT:${plan.planId}`);
-        await update(previous?.phase === "ADDED" || previous?.phase === "ALREADY_ADDED" ? "ALREADY_ADDED" : "ADDED");
-        return { state, createdWorkouts: result.created, unchangedWorkouts: result.unchanged };
+        if (planDraftSemanticPlan(existingPlan.payload) !== planDraftSemanticPlan(plan)) throw new Error(`STARTER_PACK_PLAN_CONFLICT:${plan.planId}`);
+        const authoritativeDependencies = await this.dependencies.drafts.listPlanDependencyRecords(owner, plan.planId);
+        const expectedDependencies = normalizePlanDependencyRecords(plan, owner, existingPlan.revision, existingPlan.createdAt, existingPlan.updatedAt);
+        const expectedById = new Map(expectedDependencies.map(item => [item.dependencyId, planDraftSemanticDependency(item)]));
+        const authoritativeById = new Map(authoritativeDependencies.filter(item => item.deletedAt == null)
+          .map(item => [item.dependencyId, planDraftSemanticDependency(item)]));
+        const mismatched = [...authoritativeById].some(([id, semantic]) => expectedById.get(id) !== semantic);
+        if (mismatched || authoritativeById.size > expectedById.size) throw new Error(`STARTER_PACK_PLAN_CONFLICT:${plan.planId}`);
+        const complete = authoritativeById.size === expectedById.size && [...expectedById].every(([id, semantic]) => authoritativeById.get(id) === semantic);
+        if (complete) {
+          await update("ALREADY_ADDED");
+          return { state, createdWorkouts: result.created, unchangedWorkouts: result.unchanged };
+        }
       }
       await this.dependencies.drafts.savePlanDraft(owner, plan);
       await this.dependencies.sync.syncPending();

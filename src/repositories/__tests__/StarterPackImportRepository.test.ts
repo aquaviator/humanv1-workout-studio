@@ -3,12 +3,17 @@ import { createWorkoutDraft } from "../../domain/workoutDraftFactory";
 import { canonicalJson } from "../../domain/canonical";
 import { representativeStarterPack } from "../../fixtures/representativeStarterPack";
 import { StarterPackImportRepository, type StarterPackOperationState } from "../StarterPackImportRepository";
+import { normalizePlanDependencyRecords } from "../../domain/planDraftDependencies";
 
 const documents = representativeStarterPack.workoutManifest.workouts.map(spec => ({ path: "workoutDrafts/test" as const, workout: createWorkoutDraft({ ...spec, strategy: "GOVERNED_IMPORT", importNamespace: representativeStarterPack.workoutManifest.operationNamespace, datasetVersion: representativeStarterPack.datasetVersion, catalogueReleaseId: "strength-2026.08.36-v1" }) }));
 
 function harness(interruptAt = 0) {
-  const workouts: any[] = []; let plan: any; let applyCalls = 0; const states = new Map<string, StarterPackOperationState>();
-  const savePlanDraft = vi.fn(async (owner: string, payload: any) => { plan = { globalId: payload.planId, humanUserId: owner, payload, deletedAt: null }; });
+  const workouts: any[] = []; const dependencies: any[] = []; let plan: any; let applyCalls = 0; const states = new Map<string, StarterPackOperationState>();
+  const savePlanDraft = vi.fn(async (owner: string, payload: any) => {
+    const revision = (plan?.revision ?? 0) + 1; const createdAt = plan?.createdAt ?? "2026-09-22T00:00:00.000Z"; const updatedAt = `2026-09-22T00:00:0${revision}.000Z`;
+    plan = { schemaVersion: 1, globalId: payload.planId, humanUserId: owner, revision, status: "DRAFT", payload, createdAt, updatedAt, deletedAt: null, originClientId: "test" };
+    dependencies.splice(0, dependencies.length, ...normalizePlanDependencyRecords(payload, owner, revision, createdAt, updatedAt));
+  });
   const importer = {
     dryRun: vi.fn(async () => ({ releaseId: "strength-2026.08.36-v1", documents })),
     apply: vi.fn(async (_manifest: any, owner: string) => {
@@ -21,10 +26,10 @@ function harness(interruptAt = 0) {
     }),
   };
   const repository = new StarterPackImportRepository({ importer: importer as any,
-    drafts: { listWorkoutEnvelopes: async () => workouts, getPlanEnvelope: async () => plan, savePlanDraft },
+    drafts: { listWorkoutEnvelopes: async () => workouts, getPlanEnvelope: async () => plan, listPlanDependencyRecords: async () => dependencies, savePlanDraft },
     sync: { syncDown: vi.fn(async () => undefined), syncPending: vi.fn(async () => undefined), listSyncRecords: vi.fn(async (_owner, type) => type === "plan" && plan ? [{ envelope: plan, status: "SYNCED" }] : []) } as any,
     readState: async key => states.get(key), writeState: async (key, state) => { states.set(key, state); }, now: () => new Date("2026-09-22T12:00:00Z"), registry: new Map([[representativeStarterPack.packId, representativeStarterPack]]) });
-  return { repository, workouts, get plan() { return plan; }, importer, savePlanDraft, states };
+  return { repository, workouts, dependencies, get plan() { return plan; }, setPlan(value: any) { plan = value; }, importer, savePlanDraft, states };
 }
 
 describe("StarterPackImportRepository", () => {
@@ -57,5 +62,23 @@ describe("StarterPackImportRepository", () => {
     const second = h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK");
     await Promise.all([first, second]);
     expect(h.importer.apply).toHaveBeenCalledTimes(1); expect(h.savePlanDraft).toHaveBeenCalledTimes(1);
+  });
+  it("repairs one missing dependency with one callable-bound save", async () => {
+    const h = harness(); await h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK");
+    h.dependencies.pop(); h.savePlanDraft.mockClear();
+    const result = await h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK");
+    expect(result.state.phase).toBe("ADDED"); expect(h.savePlanDraft).toHaveBeenCalledTimes(1); expect(h.dependencies).toHaveLength(57);
+  });
+  it("reports a conflicting authoritative plan without invoking the callable", async () => {
+    const h = harness(); await h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK");
+    h.plan.payload.title = "User-edited plan"; h.savePlanDraft.mockClear();
+    await expect(h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK")).rejects.toThrow("STARTER_PACK_PLAN_CONFLICT");
+    expect(h.savePlanDraft).not.toHaveBeenCalled(); expect([...h.states.values()][0].phase).toBe("NEEDS_ATTENTION");
+  });
+  it("reconstructs complete authoritative state after reload or stale sending without a save", async () => {
+    const h = harness(); await h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK"); h.savePlanDraft.mockClear();
+    const state = [...h.states.values()][0]; state.phase = "CREATING_PLAN"; await h.states.set([...h.states.keys()][0], state);
+    const reloaded = await h.repository.import("owner", representativeStarterPack.packId, "ADD STARTER PACK");
+    expect(reloaded.state.phase).toBe("ALREADY_ADDED"); expect(h.savePlanDraft).not.toHaveBeenCalled();
   });
 });

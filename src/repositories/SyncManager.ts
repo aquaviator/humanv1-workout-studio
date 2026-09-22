@@ -25,7 +25,7 @@ export interface PlanDraftSaveRequest {
   expectedContentChecksum: string;
 }
 
-interface PlanDraftSaveResult { planId: string; revision: number; contentChecksum: string; status: 'SAVED'; idempotent: boolean; dependencyCount: number; updatedAt: string }
+interface PlanDraftSaveResult { planId: string; revision: number; contentChecksum: string; status: 'SAVED' | 'UNCHANGED'; idempotent: boolean; dependencyCount: number; updatedAt: string }
 
 export interface SyncRecord {
   syncType?: 'draft' | 'publication';
