@@ -11,8 +11,14 @@ describe('invited-beta web readiness', () => {
     expect(headers['Content-Security-Policy']).toContain("default-src 'self'");
     expect(headers['Content-Security-Policy']).toContain('https://*.googleapis.com');
     expect(headers['Content-Security-Policy']).toContain('wss://*.firebaseio.com');
+    expect(headers['Content-Security-Policy']).toContain('https://europe-west1-hv1-platform.cloudfunctions.net');
+    expect(headers['Content-Security-Policy']).not.toContain('https://*.cloudfunctions.net');
+    expect(headers['Content-Security-Policy']).not.toMatch(/(?:localhost|127\.0\.0\.1)/);
     expect(headers['Content-Security-Policy']).not.toContain("'unsafe-eval'");
+    expect(headers['Content-Security-Policy']).toContain("script-src 'self' https://apis.google.com");
     expect(headers['Content-Security-Policy']).toContain("frame-ancestors 'none'");
+    expect(headers['Content-Security-Policy']).toContain("object-src 'none'");
+    expect(headers['Content-Security-Policy']).toContain('frame-src https://*.firebaseapp.com https://accounts.google.com');
     expect(headers['Strict-Transport-Security']).toBe('max-age=31536000; includeSubDomains');
     expect(headers['X-Robots-Tag']).toBe('noindex, nofollow, noarchive');
   });
