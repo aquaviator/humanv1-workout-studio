@@ -11,11 +11,12 @@ const shortTemp = join(process.env.TEMP ?? resolve('.tmp-browser'), 'hv1-browser
 mkdirSync(shortTemp, { recursive: true });
 
 const firebaseBin = join(process.cwd(), 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
-const child = spawn(process.execPath, [firebaseBin, 'emulators:start', '--only', 'auth,firestore', '--project', projectId], {
+const child = spawn(process.execPath, [firebaseBin, 'emulators:start', '--only', 'auth,firestore,functions', '--project', projectId, '--config', 'firebase.browser.json'], {
   env: {
     ...process.env, JAVA_HOME: javaHome, TEMP: shortTemp, TMP: shortTemp,
     JAVA_TOOL_OPTIONS: `${process.env.JAVA_TOOL_OPTIONS ?? ''} -Djava.io.tmpdir="${shortTemp}" -Djava.net.preferIPv4Stack=true`.trim(),
     PATH: `${join(javaHome, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+    FUNCTIONS_DISCOVERY_TIMEOUT: process.env.FUNCTIONS_DISCOVERY_TIMEOUT ?? '60000',
   },
   stdio: 'inherit',
 });

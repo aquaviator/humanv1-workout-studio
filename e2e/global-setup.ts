@@ -5,8 +5,10 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 
 const projectId = 'demo-humanv1-workout-studio';
 const uid = 'browser_owner_uid';
-const owner = 'human_browser_owner';
-const exercise = { schemaVersion: 1, exerciseId: 'browser_push_up', displayName: 'Push Up', category: 'Strength', equipment: [], aliases: [], trackingCapabilities: ['repetitions'] };
+const owner = 'human_browserowner01';
+const releaseId = 'strength-2026.08.36-v1';
+const exerciseIds = ['browser_push_up', 'squat', 'bench_press', 'barbell_row', 'plank', 'farmers_carry', 'romanian_deadlift', 'overhead_press', 'assisted_pull_up', 'bulgarian_split_squat', 'outdoor_walk', 'outdoor_run', 'stationary_bike', 'worlds_greatest_stretch', 'open_book_stretch', 'wall_angels'];
+const exercises = exerciseIds.map(exerciseId => ({ schemaVersion: 1, exerciseId, displayName: exerciseId === 'browser_push_up' ? 'Push Up' : exerciseId.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' '), category: 'Strength', equipment: [], aliases: [], trackingCapabilities: ['repetitions', 'duration', 'distance'] }));
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -38,7 +40,7 @@ export default async function globalSetup() {
   await auth.createUser({ uid, email: 'browser-owner@example.test', password: 'browser-password-123', displayName: 'Browser Owner' });
 
   const db = getFirestore(app);
-  const checksum = createHash('sha256').update(canonicalJson([exercise])).digest('hex');
+  const checksum = createHash('sha256').update(canonicalJson([...exercises].sort((a, b) => a.exerciseId.localeCompare(b.exerciseId)))).digest('hex');
   const batch = db.batch();
   batch.set(db.doc(`accounts/${uid}`), { schemaVersion: 1, humanUserId: owner, status: 'ACTIVE' });
   batch.set(db.doc(`users/${owner}`), { schemaVersion: 1, ownerFirebaseUid: uid, status: 'ACTIVE', displayName: 'Browser Owner' });
@@ -47,13 +49,22 @@ export default async function globalSetup() {
     productScope: 'WORKOUT_STUDIO', source: 'SUPPORT', expiryAt: Timestamp.fromDate(new Date('2099-01-01T00:00:00Z')),
     offlineReceiptValidUntil: Timestamp.fromDate(new Date('2099-01-01T00:00:00Z')),
   });
-  batch.set(db.doc('exercise_catalogue/current'), { releaseId: 'browser-catalogue', status: 'published', channel: 'production' });
-  batch.set(db.doc('exercise_catalogue_releases/browser-catalogue'), {
-    schemaVersion: 1, releaseId: 'browser-catalogue', catalogueVersion: 'browser-1', exerciseCount: 1,
+  batch.set(db.doc('exercise_catalogue/current'), { releaseId, status: 'published', channel: 'production' });
+  batch.set(db.doc(`exercise_catalogue_releases/${releaseId}`), {
+    schemaVersion: 1, releaseId, catalogueVersion: 'browser-1', exerciseCount: exercises.length,
     contentSha256: checksum, status: 'published', validationStatus: 'validated', channel: 'production', createdAt: FieldValue.serverTimestamp(),
   });
-  batch.set(db.doc('exercise_catalogue_releases/browser-catalogue/exercises/browser_push_up'), exercise);
+  for (const exercise of exercises) batch.set(db.doc(`exercise_catalogue_releases/${releaseId}/exercises/${exercise.exerciseId}`), exercise);
+  batch.set(db.doc(`users/${owner}/workoutDrafts/workout_existing_lower_body`), {
+    schemaVersion: 1, globalId: 'workout_existing_lower_body', humanUserId: owner, revision: 1, status: 'DRAFT', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', deletedAt: null, originClientId: 'browser-fixture',
+    payload: { schemaVersion: 'humanv1.workout/1', workoutId: 'workout_existing_lower_body', title: 'Lower Body Day', discipline: 'STRENGTH', catalogueReleaseId: releaseId, tags: ['existing'], blocks: [{ blockId: 'existing-squat', type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Barbell Squat', efforts: [{ effortId: 'existing-set', effortType: 'WORKING', prescriptions: [{ prescriptionId: 'existing-rx', metricKey: 'repetitions', targetValue: 5, canonicalUnit: 'count' }] }] }] },
+  });
   await batch.commit();
+  const [accountCheck, rootCheck, entitlementCheck] = await Promise.all([
+    db.doc(`accounts/${uid}`).get(), db.doc(`users/${owner}`).get(), db.doc(`accounts/${uid}/entitlements/current`).get(),
+  ]);
+  if (!accountCheck.exists || accountCheck.data()?.humanUserId !== owner || !rootCheck.exists || rootCheck.data()?.ownerFirebaseUid !== uid ||
+      !entitlementCheck.exists || entitlementCheck.data()?.humanUserId !== owner) throw new Error('Trusted browser identity fixture is not readable from the demo Admin SDK');
   await deleteApp(app);
   for (const stale of getApps().filter(item => item.name === 'browser-acceptance')) await deleteApp(stale);
 }

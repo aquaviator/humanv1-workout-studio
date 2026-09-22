@@ -30,7 +30,7 @@ export class GovernedWorkoutImportAdapter {
   async dryRun(manifest: GovernedWorkoutImportManifest): Promise<WorkoutImportDryRun> {
     if (manifest.schemaVersion !== "humanv1.governed-workout-import/1" || !manifest.workouts.length) throw new Error("INVALID_GOVERNED_IMPORT_MANIFEST");
     const [releaseId, catalogue] = await Promise.all([this.catalogue.getActiveReleaseId(), this.catalogue.getExercises()]);
-    const catalogueIds = new Set(catalogue.map(exercise => exercise.exerciseId));
+    const catalogueIds = new Set(catalogue.filter(exercise => exercise.provenance?.archived !== true).map(exercise => exercise.exerciseId));
     const seen = new Set<string>();
     const documents = manifest.workouts.map(spec => {
       const workout = createWorkoutDraft({ ...spec, strategy: "GOVERNED_IMPORT", importNamespace: manifest.operationNamespace, datasetVersion: manifest.datasetVersion, catalogueReleaseId: releaseId });
@@ -49,9 +49,10 @@ export class GovernedWorkoutImportAdapter {
     return { releaseId, documents };
   }
 
-  async apply(manifest: GovernedWorkoutImportManifest): Promise<WorkoutImportResult> {
+  async apply(manifest: GovernedWorkoutImportManifest, expectedOwner?: string, afterWorkoutSaved?: (createdCount: number) => Promise<void>): Promise<WorkoutImportResult> {
     const owner = await this.authenticatedOwner();
     if (!owner) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
+    if (expectedOwner && owner !== expectedOwner) throw new Error("AUTHENTICATED_OWNER_MISMATCH");
     const dryRun = await this.dryRun(manifest);
     const existing = new Map((await this.drafts.listWorkoutEnvelopes(owner)).map(item => [item.globalId, item] as const));
     let created = 0; let unchanged = 0;
@@ -65,6 +66,7 @@ export class GovernedWorkoutImportAdapter {
     for (const document of dryRun.documents) if (!existing.has(document.workout.workoutId)) {
       await this.drafts.saveWorkoutDraft(owner, document.workout);
       created++;
+      await afterWorkoutSaved?.(created);
     }
     return { ...dryRun, created, unchanged };
   }

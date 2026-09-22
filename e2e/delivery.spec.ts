@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
 const projectId = 'demo-humanv1-workout-studio';
-const owner = 'human_browser_owner';
+const owner = 'human_browserowner01';
 const profile = resolve('.playwright-profile', 'delivery');
 const require = createRequire(import.meta.url);
 

@@ -42,4 +42,19 @@ describe("governed workout import adapter", () => {
       { getActiveReleaseId: async () => "release-1", getExercises: async () => exercises }, async () => null);
     await expect(adapter.apply(representativeWorkoutManifest)).rejects.toThrow("AUTHENTICATED_OWNER_REQUIRED");
   });
+  it("fails closed before writes when the expected Human owner differs", async () => {
+    const saveWorkoutDraft = vi.fn();
+    const adapter = new GovernedWorkoutImportAdapter({ listWorkoutEnvelopes: vi.fn(), saveWorkoutDraft } as any,
+      { getActiveReleaseId: async () => "release-1", getExercises: async () => exercises }, async () => "human-owner-a");
+    await expect(adapter.apply(representativeWorkoutManifest, "human-owner-b")).rejects.toThrow("AUTHENTICATED_OWNER_MISMATCH");
+    expect(saveWorkoutDraft).not.toHaveBeenCalled();
+  });
+  it("rejects archived catalogue references before writes", async () => {
+    const saveWorkoutDraft = vi.fn();
+    const archived = exercises.map(item => item.exerciseId === "squat" ? { ...item, provenance: { archived: true } } : item);
+    const adapter = new GovernedWorkoutImportAdapter({ listWorkoutEnvelopes: async () => [], saveWorkoutDraft } as any,
+      { getActiveReleaseId: async () => "release-1", getExercises: async () => archived }, async () => "owner");
+    await expect(adapter.apply(representativeWorkoutManifest)).rejects.toThrow("UNKNOWN_EXERCISE_REFERENCE:squat");
+    expect(saveWorkoutDraft).not.toHaveBeenCalled();
+  });
 });

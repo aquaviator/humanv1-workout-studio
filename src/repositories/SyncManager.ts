@@ -143,7 +143,9 @@ export class SyncManager {
       .sort((a, b) => priority(a) - priority(b) || a.localeCompare(b));
     for (const key of syncKeys) {
       const record = await get<SyncRecord>(key);
-      if (record && (record.status === 'QUEUED' || record.status === 'FAILED')) {
+      // SENDING is process-local, not a durable acknowledgement. If a tab closes
+      // after persisting that state, the next manager must replay it idempotently.
+      if (record && (record.status === 'QUEUED' || record.status === 'FAILED' || record.status === 'SENDING')) {
         if (record.syncType === 'publication' && record.type === 'plan') {
           const dependencies = (record.envelope as PublishedEnvelope<PublishableContent>).payload as { workoutVersionIds?: string[] };
           const blocked = await Promise.all((dependencies.workoutVersionIds ?? []).map(async versionId => {
@@ -177,12 +179,20 @@ export class SyncManager {
         if (syncRecord?.status === 'QUEUED' || syncRecord?.status === 'FAILED' || syncRecord?.status === 'SENDING') {
           if (isReadOnlyAcceptanceMode()) continue;
           if (remoteData.revision >= syncRecord.envelope.revision) {
-            syncRecord.status = 'NEEDS_USER_REVIEW';
-            syncRecord.lastErrorCode = 'REMOTE_CHANGED_WHILE_LOCAL_PENDING';
-            const auditEntry: NonNullable<SyncRecord['auditHistory']>[number] = {
-              at: new Date().toISOString(), status: 'NEEDS_USER_REVIEW', reason: 'REMOTE_CHANGED_WHILE_LOCAL_PENDING',
-            };
-            syncRecord.auditHistory = [...(syncRecord.auditHistory ?? []), auditEntry].slice(-20);
+            if (remoteData.revision === syncRecord.envelope.revision && canonicalStringify(remoteData) === canonicalStringify(syncRecord.envelope)) {
+              syncRecord.status = 'SYNCED';
+              syncRecord.acknowledgedRevision = remoteData.revision;
+              syncRecord.lastCompletedAt = new Date().toISOString();
+              delete syncRecord.lastErrorCode;
+              setOps.push([localKey, remoteData]);
+            } else {
+              syncRecord.status = 'NEEDS_USER_REVIEW';
+              syncRecord.lastErrorCode = 'REMOTE_CHANGED_WHILE_LOCAL_PENDING';
+              const auditEntry: NonNullable<SyncRecord['auditHistory']>[number] = {
+                at: new Date().toISOString(), status: 'NEEDS_USER_REVIEW', reason: 'REMOTE_CHANGED_WHILE_LOCAL_PENDING',
+              };
+              syncRecord.auditHistory = [...(syncRecord.auditHistory ?? []), auditEntry].slice(-20);
+            }
             setOps.push([syncKey, syncRecord]);
           }
         } else if (!localData || remoteData.revision > localData.revision) {

@@ -7,6 +7,7 @@ import { PublishedEnvelope } from "../../domain/publication";
 import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { workoutLibraryRepository } from "../../repositories/WorkoutLibraryRepository";
 import { DeliveryAcknowledgement } from "../../repositories/DeliveryAcknowledgementRepository";
+import { StarterPackCard } from "../components/StarterPackCard";
 
 export default function Dashboard({ identity }: { identity: HumanIdentity }) {
   const [published, setPublished] = useState<PublishedEnvelope<any>[]>([]);
@@ -74,6 +75,7 @@ export default function Dashboard({ identity }: { identity: HumanIdentity }) {
     <div className="p-8">
       <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
       <p className="text-hv-text-muted mb-8">Welcome to your workspace, {identity.displayName}.</p>
+      <StarterPackCard identity={identity} />
       {offline && <div role="status" className="mb-4 rounded-md border border-hv-warning px-3 py-2 text-sm text-hv-warning">Offline — showing the last verified cloud status.</div>}
       
       <div className="bg-hv-surface-1 border border-hv-border rounded-lg p-6">
