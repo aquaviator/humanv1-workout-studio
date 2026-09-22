@@ -73,6 +73,8 @@ export interface Workout {
   workoutId: StableId;
   title: string;
   description?: string;
+  purpose?: string;
+  draftOrigin?: "USER_AUTHORED" | "GOVERNED_IMPORT";
   discipline: "STRENGTH" | "HIIT" | "CIRCUIT" | "TABATA" | "HYBRID" | "CARDIO" | "MOBILITY";
   catalogueReleaseId: StableId;
   protocolReleaseId?: StableId;

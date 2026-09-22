@@ -17,6 +17,10 @@ export function validateWorkout(workout: Workout, catalogue: Exercise[]): Valida
   if (!workout.title || workout.title.trim() === "") {
     errors.push({ fieldPath: "title", rule: "WORKOUT_TITLE_REQUIRED", message: "Workout is missing a title." });
   }
+  if ((workout.description?.length ?? 0) > 1200) errors.push({ fieldPath: "description", rule: "WORKOUT_DESCRIPTION_TOO_LONG", message: "Workout description must be 1,200 characters or fewer." });
+  if ((workout.purpose?.length ?? 0) > 600) errors.push({ fieldPath: "purpose", rule: "WORKOUT_PURPOSE_TOO_LONG", message: "Workout purpose must be 600 characters or fewer." });
+  if (workout.draftOrigin === "GOVERNED_IMPORT" && !workout.description?.trim()) errors.push({ fieldPath: "description", rule: "GOVERNED_DESCRIPTION_REQUIRED", message: "Training-library workouts require a description." });
+  if (workout.draftOrigin === "GOVERNED_IMPORT" && !workout.purpose?.trim()) errors.push({ fieldPath: "purpose", rule: "GOVERNED_PURPOSE_REQUIRED", message: "Training-library workouts require a purpose." });
 
   const blocks = Array.isArray(workout.blocks) ? workout.blocks : [];
   if (blocks.length === 0) {

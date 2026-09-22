@@ -5,7 +5,7 @@ import { Workout, Block, Effort, ExerciseBlock, SupersetBlock, CircuitBlock } fr
 import { draftRepository, DraftEnvelope } from "../../repositories/DraftRepository";
 import { syncManager } from "../../repositories/SyncManager";
 import { workoutLibraryRepository, WorkoutLibraryItem } from "../../repositories/WorkoutLibraryRepository";
-import { v4 as uuidv4 } from "uuid";
+import { createOpaqueDraftId } from "../../domain/workoutDraftFactory";
 import { Trash2, Copy, Edit2, RotateCcw, Search, Clock, SortAsc, Archive } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { dateFromUnknown, formatUserDate } from "../../domain/presentation";
@@ -45,16 +45,16 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
   }, [identity.humanUserId]);
 
   const handleDuplicate = async (workout: Workout) => {
-    const newWorkoutId = uuidv4();
+    const newWorkoutId = createOpaqueDraftId("workout");
     
     // deeply duplicate with new stable IDs
     const duplicateBlock = (b: Block): Block => {
       const newBlock = JSON.parse(JSON.stringify(b)) as Block;
-      newBlock.blockId = uuidv4();
+      newBlock.blockId = createOpaqueDraftId("block");
       if (newBlock.type === "EXERCISE") {
         newBlock.efforts.forEach(e => {
-          e.effortId = uuidv4();
-          e.prescriptions.forEach(p => p.prescriptionId = uuidv4());
+          e.effortId = createOpaqueDraftId("effort");
+          e.prescriptions.forEach(p => p.prescriptionId = createOpaqueDraftId("prescription"));
         });
       } else if (newBlock.type === "SUPERSET" || newBlock.type === "CIRCUIT") {
         newBlock.exercises = newBlock.exercises.map(ex => duplicateBlock(ex) as ExerciseBlock);
@@ -66,6 +66,7 @@ export default function WorkoutsList({ identity }: { identity: HumanIdentity }) 
       ...workout,
       workoutId: newWorkoutId,
       title: `${workout.title} (Copy)`,
+      draftOrigin: "USER_AUTHORED",
       blocks: workout.blocks.map(duplicateBlock)
     };
     await draftRepository.saveWorkoutDraft(identity.humanUserId, newWorkout);

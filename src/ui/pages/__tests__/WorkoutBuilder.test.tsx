@@ -57,6 +57,15 @@ describe('WorkoutBuilder', () => {
     expect(screen.getByText('Library')).toBeInTheDocument();
   });
 
+  it('edits athlete-facing description and purpose with friendly labels', () => {
+    render(<MemoryRouter><WorkoutBuilder identity={mockIdentity} /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Workout Description'), { target: { value: 'A balanced session.' } });
+    fireEvent.change(screen.getByLabelText('Workout Purpose'), { target: { value: 'Build durable strength.' } });
+    expect(screen.getByLabelText('Workout Description')).toHaveValue('A balanced session.');
+    expect(screen.getByLabelText('Workout Purpose')).toHaveValue('Build durable strength.');
+    expect(screen.getByText('Created in Studio')).toBeInTheDocument();
+  });
+
   it('adds, reorders and removes exercises inside a superset', async () => {
     render(<MemoryRouter><WorkoutBuilder identity={mockIdentity} /></MemoryRouter>);
     fireEvent.click(screen.getByText('Add Superset'));
@@ -94,6 +103,8 @@ describe('WorkoutBuilder', () => {
       workoutId,
       schemaVersion: 'humanv1.workout/1',
       title: 'Reopened Workout',
+      description: 'Original description',
+      purpose: 'Original purpose',
       discipline: 'STRENGTH' as const,
       catalogueReleaseId: 'v1',
       tags: [],
@@ -128,6 +139,8 @@ describe('WorkoutBuilder', () => {
     expect(savedDraft).not.toBeNull();
     expect(savedDraft?.title).toBe('Modified Title');
     expect(savedDraft?.workoutId).toBe(workoutId);
+    expect(savedDraft?.description).toBe('Original description');
+    expect(savedDraft?.purpose).toBe('Original purpose');
   });
 
 });

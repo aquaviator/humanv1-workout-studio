@@ -3,7 +3,6 @@ import { syncManager, SyncRecord } from "../../repositories/SyncManager";
 import { useParams } from "react-router";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { v4 as uuidv4 } from "uuid";
 import { Workout, Block, ExerciseBlock, Effort, MetricPrescription } from "../../domain/types";
 import { GripVertical, Plus, Trash2, Undo2, Redo2, Save, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
 import { catalogueRepository } from "../../repositories/FirebaseCatalogueRepository";
@@ -21,6 +20,7 @@ import { deliveryAcknowledgementRepository, DeliveryAcknowledgement } from "../.
 import { crossAppRepository, markCatalogueSource } from "../../repositories/CrossAppRepository";
 import { compatibleDestinations, presentWorkoutDelivery } from '../../domain/deliveryPresentation';
 import { WorkoutDeliveryStatus } from '../components/WorkoutDeliveryStatus';
+import { createOpaqueDraftId } from '../../domain/workoutDraftFactory';
 
 function exerciseCount(blocks: Block[]) {
   return blocks.reduce((total, block) => total + (block.type === 'EXERCISE' ? 1 : block.type === 'SUPERSET' || block.type === 'CIRCUIT' ? block.exercises.length : 0), 0);
@@ -33,7 +33,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     catalogueRepository.getExercises().then(catalogue => setExercisesData(catalogue.map(markCatalogueSource)));
     crossAppRepository.listPrivateExercises(identity.humanUserId, false).then(privateItems => setExercisesData(current => [...current.filter(item => item.source !== "PRIVATE"), ...privateItems])).catch(() => undefined);
   }, [identity.humanUserId]);
-  const [workoutId] = useState(() => routeWorkoutId || uuidv4());
+  const [workoutId] = useState(() => routeWorkoutId || createOpaqueDraftId('workout'));
 
   const { state: workout, set: setWorkout, reset, undo, redo, canUndo, canRedo } = useHistory<Workout>({
     schemaVersion: "humanv1.workout/1",
@@ -210,7 +210,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
       if (metricKey === "external_load") { unit = "kg"; val = 20; }
 
       return {
-        prescriptionId: uuidv4(),
+        prescriptionId: createOpaqueDraftId('prescription'),
         metricKey,
         targetValue: val,
         canonicalUnit: unit,
@@ -219,13 +219,13 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
     });
 
     const newBlock: ExerciseBlock = {
-      blockId: uuidv4(),
+      blockId: createOpaqueDraftId('block'),
       type: "EXERCISE",
       exerciseId,
       exerciseNameSnapshot: name,
       efforts: [
         {
-          effortId: uuidv4(),
+          effortId: createOpaqueDraftId('effort'),
           effortType: "WORKING",
           prescriptions: defaultPrescriptions,
         },
@@ -322,8 +322,8 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
               const lastEffort = ex.efforts[ex.efforts.length - 1];
               const newEffort = {
                 ...lastEffort,
-                effortId: uuidv4(),
-                prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: uuidv4() }))
+                effortId: createOpaqueDraftId('effort'),
+                prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: createOpaqueDraftId('prescription') }))
               };
               return { ...ex, efforts: [...ex.efforts, newEffort] };
             })
@@ -333,8 +333,8 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           const lastEffort = b.efforts[b.efforts.length - 1];
           const newEffort = {
             ...lastEffort,
-            effortId: uuidv4(),
-            prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: uuidv4() }))
+            effortId: createOpaqueDraftId('effort'),
+            prescriptions: lastEffort.prescriptions.map(p => ({ ...p, prescriptionId: createOpaqueDraftId('prescription') }))
           };
           return { ...b, efforts: [...b.efforts, newEffort] };
         }
@@ -525,9 +525,28 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
                 <button id="confirm-send-workout" onClick={handlePublish} className="px-4 py-2 bg-hv-primary text-hv-background rounded hover:bg-hv-primary-hover font-medium">Send to my apps</button>
             </div>
         </div>
+
     </div>
 )}
           </div>
+        </div>
+
+        <div className="mb-6 grid gap-4 rounded-lg border border-hv-border bg-hv-surface-1 p-4">
+          <label className="grid gap-1 text-sm font-medium">
+            Description
+            <span className="text-xs font-normal text-hv-text-muted">What this workout contains. Optional for workouts you create yourself.</span>
+            <textarea aria-label="Workout Description" maxLength={1200} rows={3} value={workout.description ?? ''}
+              onChange={event => setWorkout({ ...workout, description: event.target.value })}
+              className="rounded border border-hv-border bg-hv-bg p-2 font-normal" placeholder="Describe the session structure and content." />
+          </label>
+          <label className="grid gap-1 text-sm font-medium">
+            Purpose
+            <span className="text-xs font-normal text-hv-text-muted">Why an athlete would perform this workout.</span>
+            <textarea aria-label="Workout Purpose" maxLength={600} rows={2} value={workout.purpose ?? ''}
+              onChange={event => setWorkout({ ...workout, purpose: event.target.value })}
+              className="rounded border border-hv-border bg-hv-bg p-2 font-normal" placeholder="Explain the capability or training outcome this session develops." />
+          </label>
+          <p className="text-xs text-hv-text-muted">{workout.draftOrigin === 'GOVERNED_IMPORT' ? 'Added from a HumanV1 training library' : 'Created in Studio'}</p>
         </div>
 
         <div className="flex gap-4 border-b border-hv-border mb-6">
@@ -740,7 +759,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           <button
             onClick={() => {
               const newBlock: Block = {
-                blockId: uuidv4(),
+                blockId: createOpaqueDraftId('block'),
                 type: "SUPERSET",
                 exercises: []
               };
@@ -755,7 +774,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           <button
             onClick={() => {
               const newBlock: Block = {
-                blockId: uuidv4(),
+                blockId: createOpaqueDraftId('block'),
                 type: "CIRCUIT",
                 rounds: 3,
                 exercises: []
@@ -771,7 +790,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           <button
             onClick={() => {
               const newBlock: Block = {
-                blockId: uuidv4(),
+                blockId: createOpaqueDraftId('block'),
                 type: "REST",
                 durationSeconds: 60,
                 recoveryType: "PASSIVE",
@@ -787,7 +806,7 @@ export default function WorkoutBuilder({ identity }: { identity: HumanIdentity }
           <button
             onClick={() => {
               const newBlock: Block = {
-                blockId: uuidv4(),
+                blockId: createOpaqueDraftId('block'),
                 type: "NOTE",
                 text: "",
               };

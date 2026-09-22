@@ -45,7 +45,7 @@ describe('WorkoutsList cloud hydration', () => {
 
   it('offers an editable copy for an Android-origin workout without rewriting its source record', async () => {
     mocks.list.mockResolvedValue({ offline: false, verifiedAt: '2026-01-01T00:00:00Z', items: [{
-      globalId: 'android-workout', workout: { ...workout, workoutId: 'android-workout', title: 'Lower Body Day' }, draft: null,
+      globalId: 'android-workout', workout: { ...workout, workoutId: 'android-workout', title: 'Lower Body Day', description: 'Lower-body strength work.', purpose: 'Develop leg strength.', draftOrigin: 'GOVERNED_IMPORT' }, draft: null,
       updatedAt: '', state: 'DRAFT', latestVersion: null, versions: [], acknowledgement: null, acknowledgements: [], syncRecord: null,
     }] });
     render(<MemoryRouter><WorkoutsList identity={identity} /></MemoryRouter>);
@@ -58,5 +58,6 @@ describe('WorkoutsList cloud hydration', () => {
     const [, copied] = mocks.saveWorkoutDraft.mock.calls[0] as unknown as [string, typeof workout];
     expect(copied.title).toBe('Lower Body Day (Copy)');
     expect(copied.workoutId).not.toBe('android-workout');
+    expect(copied).toMatchObject({ description: 'Lower-body strength work.', purpose: 'Develop leg strength.', draftOrigin: 'USER_AUTHORED' });
   });
 });

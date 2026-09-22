@@ -38,6 +38,8 @@ export function AthletePreview({ workout, catalogue, delivery = null }: { workou
       <WorkoutDeliveryStatus delivery={delivery} />
       <div className="mb-8 border-b border-hv-border pb-4">
         <h2 className="text-3xl font-bold">{workout.title}</h2>
+        <p className="mt-3">{workout.description?.trim() || 'Description unavailable.'}</p>
+        <p className="mt-2 text-sm text-hv-text-muted"><span className="font-semibold text-hv-text">Purpose:</span> {workout.purpose?.trim() || 'Not recorded.'}</p>
         <div className="text-hv-text-muted text-sm mt-2">Discipline: {workout.discipline}</div>
       </div>
 
