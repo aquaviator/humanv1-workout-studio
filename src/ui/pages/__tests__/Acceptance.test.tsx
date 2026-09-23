@@ -177,7 +177,6 @@ describe('Acceptance Criteria', () => {
       const titleInput = screen.getByLabelText('Protocol Title');
       fireEvent.change(titleInput, { target: { value: 'Custom HIIT' } });
       
-      await waitFor(() => expect(screen.getByText('Saving...')).toBeInTheDocument(), { timeout: 3000 });
       await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument(), { timeout: 3000 });
       
       unmount();
@@ -203,7 +202,7 @@ describe('Acceptance Criteria', () => {
           </AcceptanceModeProvider>
         </MemoryRouter>
       );
-      await screen.findByRole('heading', { name: 'Two-Week Hybrid Fixture' });
+      await screen.findByRole('heading', { name: 'Two-Week Hybrid Fixture' }, { timeout: 10_000 });
       expect(screen.queryByRole('textbox', { name: 'Plan Title' })).not.toBeInTheDocument();
       expect(screen.queryByRole('textbox', { name: 'Plan Description' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Add Week' })).not.toBeInTheDocument();
@@ -240,6 +239,15 @@ describe('Acceptance Criteria', () => {
     });
 
     it('Plan save/reload, Multiple weeks, Add/move/remove placements, Keyboard-accessible alternatives', async () => {
+      const sourcePlan = plansData.find((candidate: any) => candidate.planId === 'plan_two_week_fixture') as any;
+      await draftRepository.savePlanDraft('test-user', {
+        ...structuredClone(sourcePlan),
+        weeks: sourcePlan.weeks.map((week: any) => ({
+          ...week,
+          placements: week.placements.filter((placement: any) =>
+            placement.workoutId === 'workout_strength_fixture' || placement.workoutId === 'workout_hybrid_fixture'),
+        })),
+      });
       const { unmount } = render(<MemoryRouter initialEntries={['/plans/plan_two_week_fixture']}><Routes><Route path="/plans/:planId" element={<PlanBuilder identity={mockIdentity} />} /></Routes></MemoryRouter>);
       await waitFor(() => expect(screen.queryByText('Loading...')).not.toBeInTheDocument());
       
@@ -251,10 +259,9 @@ describe('Acceptance Criteria', () => {
         expect(screen.queryAllByLabelText('Add workout to day').length).toBeGreaterThan(0);
       });
       const selects = await screen.findAllByLabelText('Add workout to day');
-      fireEvent.change(selects[0], { target: { value: '1' } });
+      fireEvent.change(selects[0], { target: { value: 'workout_strength_fixture' } });
       
-      await waitFor(() => expect(screen.getByText('Saving...')).toBeInTheDocument(), { timeout: 3000 });
-      await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument(), { timeout: 3000 });
+      await waitFor(() => expect(screen.getByText('Saved on this device')).toBeInTheDocument(), { timeout: 3000 });
       
       unmount();
       

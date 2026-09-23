@@ -36,17 +36,27 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
   const [editableWorkoutIds, setEditableWorkoutIds] = React.useState<Set<string>>(new Set());
   const [workoutDrafts, setWorkoutDrafts] = React.useState<Map<string, DraftEnvelope<Workout>>>(new Map());
   const [workoutsLoaded, setWorkoutsLoaded] = React.useState(false);
-  React.useEffect(() => { 
-    Promise.all([draftRepository.listWorkoutDrafts(identity.humanUserId), draftRepository.listWorkoutEnvelopes(identity.humanUserId)]).then(([data, envelopes]) => {
+  React.useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      // A plan can arrive from Human Strength before this preview origin has a
+      // local workout cache. Hydrate the owner-scoped draft envelopes first so
+      // legacy/app placements can be pinned to their authoritative revision.
+      await syncManager.syncDown(identity.humanUserId, ["workout"]).catch(() => undefined);
+      const [data, envelopes] = await Promise.all([draftRepository.listWorkoutDrafts(identity.humanUserId), draftRepository.listWorkoutEnvelopes(identity.humanUserId)]);
+      if (!mounted) return;
       setWorkoutsData(data);
       setEditableWorkoutIds(new Set(data.map(workout => workout.workoutId)));
       setWorkoutDrafts(new Map(envelopes.map(envelope => [envelope.globalId, envelope])));
       setWorkoutsLoaded(true);
       crossAppRepository.listAppWorkouts(identity.humanUserId).then(app => setWorkoutsData(current => [...current, ...app.filter(remote => !current.some(local => local.workoutId === remote.workoutId))])).catch(() => undefined);
-    }).catch(() => {
+    };
+    load().catch(() => {
+      if (!mounted) return;
       setWorkoutsData([]);
       setWorkoutsLoaded(true);
-    }); 
+    });
+    return () => { mounted = false; };
   }, [identity.humanUserId]);
   const [planId] = useState(() => routePlanId && routePlanId !== 'new' ? routePlanId : uuidv4());
 
@@ -106,7 +116,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       setSaveStatus("Saved on this device");
       return;
     }
-    if (validationErrors.length > 0) {
+    if (validationErrors.length > 0 || dependencyIssues.length > 0) {
       setSaveStatus("Needs attention");
       return;
     }
@@ -117,7 +127,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       draftRepository.savePlanDraft(identity.humanUserId, normalized).then(() => setSaveStatus("Saved on this device")).catch(() => setSaveStatus("Needs attention"));
     }, 500);
     return () => clearTimeout(timeout);
-  }, [plan, identity.humanUserId, isLoading, validationErrors.length, isReadOnlyAcceptance]);
+  }, [plan, identity.humanUserId, isLoading, validationErrors.length, dependencyIssues.length, isReadOnlyAcceptance]);
 
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);

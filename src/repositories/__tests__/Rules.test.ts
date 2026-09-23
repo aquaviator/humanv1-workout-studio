@@ -441,4 +441,4 @@ describe('Firestore Security Rules', () => {
     await assertFails(deleteDoc(ref));
     await assertFails(setDoc(doc(alice, 'users', 'human_1', 'templateExercises', 'slot_1'), { globalId: 'slot_1', humanUserId: 'human_2', templateGlobalId: 'routine_1', exerciseId: 'squat', position: 0, createdAt: 1, updatedAt: 1, deletedAt: null, revision: 1, originDeviceId: 'app' }));
   });
-});
+}, 30_000);

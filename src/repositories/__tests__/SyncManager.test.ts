@@ -171,4 +171,28 @@ describe('SyncManager publication replay', () => {
     state.callableFailure = Object.assign(new Error('Workout changed'), { code: 'functions/failed-precondition' }); await manager.syncPending();
     const failed = (await manager.listSyncRecords('human-1', 'plan'))[0]; expect(failed.status).toBe('NEEDS_USER_REVIEW'); expect(failed.envelope).toEqual(record.envelope);
   });
+
+  it('preserves a callable validation reason instead of misreporting it as a revision conflict', async () => {
+    const record = { envelope: { schemaVersion: 1, globalId: 'plan-1', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: { planId: 'plan-1' }, createdAt: '', updatedAt: '', deletedAt: null, originClientId: 'web' },
+      syncType: 'draft', status: 'QUEUED', type: 'plan', planSave: { planId: 'plan-1' } };
+    state.values.set('sync_human-1_plan_plan-1', record); Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    state.callableFailure = Object.assign(new Error('Workout changed'), { code: 'functions/failed-precondition', details: {
+      reason: 'WORKOUT_REVISION_STALE', placementId: 'placement-1', displayName: 'Workout', explanation: 'Workout changed.',
+      correctiveAction: 'Review the workout.', contentPreserved: true,
+    } });
+    const manager = new SyncManager(); (manager as unknown as { isOnline: boolean }).isOnline = true; await manager.syncPending();
+    const failed = (await manager.listSyncRecords('human-1', 'plan'))[0];
+    expect(failed.lastErrorCode).toBe('CONTENT_REJECTED'); expect(failed.attention).toMatchObject({ technicalCode: 'WORKOUT_REVISION_STALE', contentPreserved: true });
+  });
+
+  it('preserves a rejected create precondition when corrected content is queued', async () => {
+    const plan = { schemaVersion: 'humanv1.studio-plan-draft/1', planId: 'plan-1', title: 'Plan', description: '', weeks: [{ weekId: 'week-1', weekNumber: 1, label: 'Week 1', placements: [] }] } as Plan;
+    const first = { schemaVersion: 1, globalId: 'plan-1', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: plan,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', deletedAt: null, originClientId: 'web' } as DraftEnvelope<Plan>;
+    const manager = new SyncManager(); await manager.queuePlanSave(first, []);
+    const failed = state.values.get('sync_human-1_plan_plan-1') as any; failed.status = 'NEEDS_USER_REVIEW'; state.values.set('sync_human-1_plan_plan-1', failed);
+    await manager.queuePlanSave({ ...first, revision: 2, updatedAt: '2026-01-01T00:00:01.000Z' }, []);
+    const corrected = (await manager.listSyncRecords('human-1', 'plan'))[0];
+    expect(corrected.planSave).toMatchObject({ create: true, expectedRevision: null });
+  });
 });

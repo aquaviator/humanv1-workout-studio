@@ -11,7 +11,7 @@ import { assertMutationAllowed, isReadOnlyAcceptanceMode } from '../config/mutat
 import type { Plan, PlanDraftDependencyRecord } from '../domain/types';
 
 export type SyncStatus = 'QUEUED' | 'SENDING' | 'SYNCED' | 'CONFLICT' | 'FAILED' | 'NEEDS_USER_REVIEW';
-export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
+export type SyncFailureCode = 'NETWORK_OFFLINE' | 'NETWORK_RETRYABLE' | 'PERMISSION_DENIED' | 'OWNERSHIP_CONFLICT' | 'REVISION_CONFLICT' | 'REVISION_COLLISION' | 'REMOTE_CHANGED_WHILE_LOCAL_PENDING' | 'CONTENT_REJECTED' | 'CORRUPT_PAYLOAD' | 'UPLOAD_FAILED';
 
 export interface PlanDraftSaveRequest {
   planId: string;
@@ -116,7 +116,12 @@ export class SyncManager {
     assertMutationAllowed('queueUpload:draft:plan');
     const key = `sync_${envelope.humanUserId}_plan_${envelope.globalId}`;
     const previous = await get<SyncRecord>(key);
-    const expectedRevision = previous?.planSave?.expectedRevision ?? previous?.acknowledgedRevision ?? (envelope.revision > 1 ? envelope.revision - 1 : null);
+    // A null expected revision is a meaningful create precondition. Preserve it
+    // after a rejected create so the corrected payload does not become an update
+    // against a document that was never written.
+    const expectedRevision = previous?.planSave
+      ? previous.planSave.expectedRevision
+      : previous?.acknowledgedRevision ?? (envelope.revision > 1 ? envelope.revision - 1 : null);
     const dependencies = records.map(({ schemaVersion: _schema, humanUserId: _owner, planId: _plan, revision: _revision,
       createdAt: _created, updatedAt: _updated, deletedAt: _deleted, ...dependency }) => dependency);
     const canonical = canonicalStringify({ schemaVersion: 'humanv1.studio-plan-draft/1', planId: envelope.globalId,
@@ -277,6 +282,8 @@ export class SyncManager {
       if (e instanceof Error) {
         const firebaseCode = 'code' in e && typeof e.code === 'string' ? e.code : '';
         const normalizedFirebaseCode = firebaseCode.replace('functions/', '');
+        const details = 'details' in e && e.details && typeof e.details === 'object' ? e.details as Record<string, unknown> : undefined;
+        const serverReason = typeof details?.reason === 'string' ? details.reason : undefined;
         if (e.message.includes('Connection failed') || e.message.toLowerCase().includes('offline') || normalizedFirebaseCode === 'unavailable') {
           isNetworkError = true;
           errorCode = 'NETWORK_OFFLINE';
@@ -286,7 +293,12 @@ export class SyncManager {
           console.warn("Sync upload failed (expected retryable): NETWORK_RETRYABLE");
         } else if (e.message === 'OWNERSHIP_CONFLICT' || e.message === 'REVISION_CONFLICT' || e.message === 'REVISION_COLLISION' || e.message === 'CORRUPT_PAYLOAD' ||
           ['invalid-argument', 'failed-precondition', 'permission-denied', 'unauthenticated', 'not-found'].includes(normalizedFirebaseCode)) {
-          errorCode = e.message === 'CORRUPT_PAYLOAD' ? 'CORRUPT_PAYLOAD' : firebaseCode.includes('permission-denied') || firebaseCode.includes('unauthenticated') ? 'PERMISSION_DENIED' : 'REVISION_CONFLICT';
+          const revisionReason = serverReason === 'PLAN_REVISION_STALE' || serverReason === 'PLAN_ALREADY_EXISTS' || serverReason === 'IDEMPOTENCY_KEY_REUSED';
+          errorCode = e.message === 'CORRUPT_PAYLOAD' ? 'CORRUPT_PAYLOAD'
+            : firebaseCode.includes('permission-denied') || firebaseCode.includes('unauthenticated') ? 'PERMISSION_DENIED'
+              : e.message === 'OWNERSHIP_CONFLICT' || serverReason === 'OWNER_BINDING_INVALID' ? 'OWNERSHIP_CONFLICT'
+                : e.message === 'REVISION_COLLISION' ? 'REVISION_COLLISION'
+                  : e.message === 'REVISION_CONFLICT' || revisionReason ? 'REVISION_CONFLICT' : 'CONTENT_REJECTED';
           isTerminal = true;
           console.error(`Sync upload terminal conflict: ${errorCode}`);
         } else if (e.message.includes('Missing or insufficient permissions') || firebaseCode === 'permission-denied') {

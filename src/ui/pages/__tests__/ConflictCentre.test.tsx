@@ -39,4 +39,17 @@ describe('Issues needing attention', () => {
     expect(mocks.saveWorkout.mock.calls[0][1]).toMatchObject({ workoutId: 'preserved-copy-id', title: 'Send Workout (Preserved copy)' });
     expect(mocks.remote).toHaveBeenCalledWith('human-1', issue);
   });
+
+  it('shows a server validation explanation and keeps its technical reason collapsed', async () => {
+    const validationIssue = { ...issue, type: 'plan', lastErrorCode: 'CONTENT_REJECTED', attention: {
+      explanation: 'Workout changed.', correctiveAction: 'Review the workout.', contentPreserved: true, technicalCode: 'WORKOUT_REVISION_STALE',
+    } };
+    mocks.list.mockImplementation((_owner: string, type: string) => Promise.resolve(type === 'plan' ? [validationIssue] : []));
+    render(<ConflictCentre identity={identity} />);
+    expect(await screen.findByText('Workout changed.')).toBeInTheDocument();
+    expect(screen.getByText('Review the workout.')).toBeInTheDocument();
+    expect(screen.queryByText(/WORKOUT_REVISION_STALE/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review differences' }));
+    expect(screen.getByText(/WORKOUT_REVISION_STALE/)).toBeInTheDocument();
+  });
 });

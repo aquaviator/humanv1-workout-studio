@@ -76,7 +76,7 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2 text-hv-error">
                   <AlertCircle className="w-5 h-5" />
-                  <span className="font-semibold">Newer edits need attention</span>
+                  <span className="font-semibold">{conflict.attention ? "Content needs attention" : "Newer edits need attention"}</span>
                 </div>
                 <div className="text-hv-text">
                   <span className="capitalize font-medium">{conflict.type}</span>: {conflict.envelope.payload.title || "Untitled"}
@@ -86,8 +86,9 @@ export default function ConflictCentre({ identity }: { identity: HumanIdentity }
                   <span>Local Rev: {conflict.envelope.revision}</span>
                   <span>Updated: {formatUserDate(conflict.envelope.updatedAt, true)}</span>
                 </div>
-                <p id={`issue-${idx}`} className="text-sm text-hv-text-muted">This {conflict.type} changed elsewhere after this browser saved its copy. Your changes have been preserved, but Studio will not overwrite the newer version.</p>
-                {reviewing === `${conflict.type}-${conflict.envelope.globalId}` && <details open className="text-xs text-hv-text-muted"><summary>Technical details</summary><div>Local revision {conflict.envelope.revision}; reason {conflict.lastErrorCode ?? 'not recorded'}.</div></details>}
+                <p id={`issue-${idx}`} className="text-sm text-hv-text-muted">{conflict.attention?.explanation ?? `This ${conflict.type} changed elsewhere after this browser saved its copy. Your changes have been preserved, but Studio will not overwrite the newer version.`}</p>
+                {conflict.attention && <p className="text-sm text-hv-text-muted">{conflict.attention.correctiveAction}</p>}
+                {reviewing === `${conflict.type}-${conflict.envelope.globalId}` && <details open className="text-xs text-hv-text-muted"><summary>Technical details</summary><div>Local revision {conflict.envelope.revision}; reason {conflict.attention?.technicalCode ?? conflict.lastErrorCode ?? 'not recorded'}.</div></details>}
               </div>
               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                 <button 
