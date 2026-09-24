@@ -182,7 +182,6 @@ export class SyncManager {
         const syncRecord = await get<SyncRecord>(syncKey);
 
         if (syncRecord?.status === 'QUEUED' || syncRecord?.status === 'FAILED' || syncRecord?.status === 'SENDING') {
-          if (isReadOnlyAcceptanceMode()) continue;
           if (remoteData.revision >= syncRecord.envelope.revision) {
             if (remoteData.revision === syncRecord.envelope.revision && canonicalStringify(remoteData) === canonicalStringify(syncRecord.envelope)) {
               syncRecord.status = 'SYNCED';

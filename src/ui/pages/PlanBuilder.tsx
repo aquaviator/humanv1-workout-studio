@@ -22,7 +22,7 @@ import { planDeliveryRepository, PlanDeliveryAttempt, PlanDeliveryPhase } from "
 import { deliveryAcknowledgementRepository } from "../../repositories/DeliveryAcknowledgementRepository";
 import { PublicationDiagnosticError, transientPublicationDiagnostic, validatePlanPublicationDependencies } from "../../domain/publicationDiagnostics";
 import type { DraftEnvelope } from "../../repositories/DraftRepository";
-import { dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, validateDraftDependencies, workoutDraftDependency } from "../../domain/planDraftDependencies";
+import { dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, reconcileAuthoritativePlanDependencies, validateDraftDependencies, workoutDraftDependency } from "../../domain/planDraftDependencies";
 import { governedPublicationRepository } from "../../repositories/GovernedPublicationRepository";
 import { useAcceptanceMode } from "../components/AcceptanceModeProvider";
 import { assertMutationAllowed } from "../../config/mutationPolicy";
@@ -42,7 +42,7 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
       // A plan can arrive from Human Strength before this preview origin has a
       // local workout cache. Hydrate the owner-scoped draft envelopes first so
       // legacy/app placements can be pinned to their authoritative revision.
-      await syncManager.syncDown(identity.humanUserId, ["workout"]).catch(() => undefined);
+      await syncManager.syncDown(identity.humanUserId, ["workout", "plan"]).catch(() => undefined);
       const [data, envelopes] = await Promise.all([draftRepository.listWorkoutDrafts(identity.humanUserId), draftRepository.listWorkoutEnvelopes(identity.humanUserId)]);
       if (!mounted) return;
       setWorkoutsData(data);
@@ -96,8 +96,9 @@ export default function PlanBuilder({ identity }: { identity: HumanIdentity }) {
     if (!workoutsLoaded) return;
     let mounted = true;
     if (routePlanId) {
-      draftRepository.getPlanDraft(identity.humanUserId, routePlanId).then(async (draft) => {
+      Promise.all([draftRepository.getPlanEnvelope(identity.humanUserId, routePlanId), draftRepository.listPlanDependencyRecords(identity.humanUserId, routePlanId).catch(() => [])]).then(async ([envelope, dependencyRecords]) => {
         if (!mounted) return;
+        const draft = envelope ? reconcileAuthoritativePlanDependencies(envelope.payload, identity.humanUserId, envelope.revision, dependencyRecords) : null;
         const appPlan = draft ? null : (await crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])).find(item => item.planId === routePlanId);
         if (draft || appPlan) reset(draft ? migrateLegacyPlanDraft(draft, identity.humanUserId, workoutDrafts).plan : appPlan!);
         setIsLoading(false);

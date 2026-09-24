@@ -17,7 +17,8 @@ const state = vi.hoisted(() => ({
 vi.mock('../../../repositories/DraftRepository', () => ({ draftRepository: {
   listWorkoutDrafts: vi.fn(async () => [state.workout]), getPlanDraft: vi.fn(async () => state.plan),
   listWorkoutEnvelopes: vi.fn(async () => [{ schemaVersion: 1, globalId: state.workout.workoutId, humanUserId: 'synthetic_owner', revision: 1, status: 'DRAFT', payload: state.workout, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' }]),
-  getPlanEnvelope: vi.fn(async () => ({ revision: 1 })),
+  getPlanEnvelope: vi.fn(async () => ({ schemaVersion: 1, globalId: state.plan.planId, humanUserId: 'synthetic_owner', revision: 1, status: 'DRAFT', payload: state.plan, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' })),
+  listPlanDependencyRecords: vi.fn(async () => []),
   savePlanDraft: vi.fn(async () => undefined),
 } }));
 vi.mock('../../../repositories/CrossAppRepository', () => ({ crossAppRepository: {

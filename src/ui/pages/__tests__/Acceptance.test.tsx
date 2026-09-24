@@ -91,7 +91,8 @@ vi.mock('../../../repositories/DraftRepository', () => ({
     listPlanDrafts: vi.fn().mockImplementation(() => Promise.resolve(Array.from(plansDb.values()))),
     savePlanDraft: vi.fn().mockImplementation((uid, draft) => { plansDb.set(draft.planId, draft); return Promise.resolve(); }),
     getPlanDraft: vi.fn().mockImplementation((uid, id) => Promise.resolve(plansDb.get(id) || null)),
-    getPlanEnvelope: vi.fn().mockImplementation(() => Promise.resolve({ revision: 1 })),
+    getPlanEnvelope: vi.fn().mockImplementation((uid, id) => { const payload = plansDb.get(id); return Promise.resolve(payload ? { schemaVersion: 1, globalId: id, humanUserId: uid, revision: 1, status: 'DRAFT', payload, createdAt: '2026-01-01', updatedAt: '2026-01-01', deletedAt: null, originClientId: 'test' } : null); }),
+    listPlanDependencyRecords: vi.fn(async () => []),
   }
 }));
 

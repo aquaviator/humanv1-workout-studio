@@ -8,14 +8,23 @@ import ReconstructionDiagnostics from "../components/ReconstructionDiagnostics";
 import { TriathlonResearchLibrary } from "../components/TriathlonResearchLibrary";
 import { cloneResearchPlanToDraft } from "../../fixtures/triathlonResearchFixtures";
 import { isReadOnlyAcceptanceMode } from "../../config/mutationPolicy";
+import { syncManager } from "../../repositories/SyncManager";
 
 export default function PlansList({ identity }: { identity: HumanIdentity }) {
   const navigate = useNavigate();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [loading, setLoading] = useState(true);
   const readOnlyAcceptance = isReadOnlyAcceptanceMode();
   useEffect(() => {
-    Promise.all([draftRepository.listPlanDrafts(identity.humanUserId), crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])]).then(([local, app]) => setPlans([...local, ...app.filter(remote => !local.some(item => item.planId === remote.planId))]));
+    let mounted = true;
+    void syncManager.syncDown(identity.humanUserId, ["plan"]).catch(() => undefined).then(() =>
+      Promise.all([draftRepository.listPlanDrafts(identity.humanUserId), crossAppRepository.listAppPlans(identity.humanUserId).catch(() => [])]))
+      .then(([local, app]) => { if (mounted) setPlans([...local, ...app.filter(remote => !local.some(item => item.planId === remote.planId))]); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
   }, [identity.humanUserId]);
+
+  if (loading) return <div className="p-8 text-center text-hv-text-muted" role="status">Reconciling saved plans…</div>;
 
   return (
     <div className="p-8">

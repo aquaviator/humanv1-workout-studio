@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({ values: new Map<string, unknown>(), remoteDocs
 vi.mock('idb-keyval', () => ({
   get: vi.fn((key: string) => Promise.resolve(state.values.get(key))),
   set: vi.fn((key: string, value: unknown) => { state.values.set(key, structuredClone(value)); return Promise.resolve(); }),
-  keys: vi.fn(() => Promise.resolve([...state.values.keys()])), setMany: vi.fn(),
+  keys: vi.fn(() => Promise.resolve([...state.values.keys()])), setMany: vi.fn((entries: Array<[string, unknown]>) => { for (const [key, value] of entries) state.values.set(key, structuredClone(value)); return Promise.resolve(); }),
   del: vi.fn((key: string) => { state.values.delete(key); return Promise.resolve(); }),
 }));
 vi.mock('../../config/firebase', () => ({ db: {}, functions: {} }));
@@ -61,6 +61,35 @@ describe('SyncManager publication replay', () => {
     expect(state.callableInputs).toHaveLength(0);
     expect(state.transactionCount).toBe(0);
     expect((await manager.listSyncRecords('human-1', 'plan'))[0].status).toBe('QUEUED');
+  });
+
+  it('retires an acknowledged stale operation during read-only hydration without replaying it', async () => {
+    window.history.replaceState({}, '', '/plans/plan-1?acceptance=read-only');
+    const draft = { schemaVersion: 1, globalId: 'w1', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', deletedAt: null, originClientId: 'web' };
+    state.values.set('drafts_human-1_workout_w1', draft);
+    state.values.set('sync_human-1_workout_w1', { envelope: draft, syncType: 'draft', status: 'SENDING', type: 'workout', attemptCount: 1 });
+    state.remoteDocs.push({ id: 'w1', data: draft });
+    const manager = new SyncManager(); (manager as unknown as { isOnline: boolean }).isOnline = true;
+    await manager.syncDown('human-1', ['workout']);
+    const result = (await manager.listSyncRecords('human-1', 'workout'))[0];
+    expect(result.status).toBe('SYNCED'); expect(result.acknowledgedRevision).toBe(1);
+    expect(state.transactionCount).toBe(0); expect(state.callableInputs).toHaveLength(0);
+  });
+
+  it('preserves one divergent dirty local record as a conflict when remote is newer', async () => {
+    const local = { schemaVersion: 1, globalId: 'w1', humanUserId: 'human-1', revision: 2, status: 'DRAFT', payload: { ...payload, title: 'Local edit' },
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', deletedAt: null, originClientId: 'web' };
+    const remote = { ...local, revision: 3, payload: { ...payload, title: 'Remote edit' }, updatedAt: '2026-01-03T00:00:00.000Z' };
+    state.values.set('drafts_human-1_workout_w1', local);
+    state.values.set('sync_human-1_workout_w1', { envelope: local, syncType: 'draft', status: 'QUEUED', type: 'workout' });
+    state.remoteDocs.push({ id: 'w1', data: remote });
+    const manager = new SyncManager(); (manager as unknown as { isOnline: boolean }).isOnline = true;
+    await manager.syncDown('human-1', ['workout']);
+    expect((state.values.get('drafts_human-1_workout_w1') as typeof local).payload.title).toBe('Local edit');
+    const result = (await manager.listSyncRecords('human-1', 'workout'))[0];
+    expect(result.status).toBe('NEEDS_USER_REVIEW'); expect(result.lastErrorCode).toBe('REMOTE_CHANGED_WHILE_LOCAL_PENDING');
+    expect(state.transactionCount).toBe(0);
   });
 
   it('durably queues offline and a reconstructed manager sees the queue', async () => {

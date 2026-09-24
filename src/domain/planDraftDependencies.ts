@@ -24,6 +24,51 @@ export const planDraftSemanticDependency = (record: PlanDraftDependencyRecord): 
   displayName: record.displayName, provenance: record.provenance,
 });
 
+const dependencyFromRecord = (record: PlanDraftDependencyRecord): PlanDraftDependency | null => {
+  if (record.deletedAt != null) return null;
+  if (record.dependencyKind === "WORKOUT_DRAFT") {
+    if (record.expectedRevision == null || record.provenance !== "WORKOUT_STUDIO") return null;
+    return { kind: "WORKOUT_DRAFT", workoutDraftId: record.referencedStableId, humanUserId: record.humanUserId,
+      expectedRevision: record.expectedRevision, ...(record.expectedUpdatedAt ? { expectedUpdatedAt: record.expectedUpdatedAt } : {}),
+      displayName: record.displayName, originApplication: "WORKOUT_STUDIO" };
+  }
+  if (record.dependencyKind === "PUBLISHED_WORKOUT_VERSION") {
+    if (!record.immutableVersionId || record.immutableRevision == null || !record.immutableChecksum ||
+      record.immutableSchemaVersion !== "humanv1.canonical-workout/1") return null;
+    return { kind: "PUBLISHED_WORKOUT_VERSION", workoutGlobalId: record.referencedStableId, versionId: record.immutableVersionId,
+      revision: record.immutableRevision, checksum: record.immutableChecksum, schemaVersion: record.immutableSchemaVersion,
+      displayName: record.displayName };
+  }
+  if (!record.immutableVersionId || (record.provenance !== "RESEARCH_CANDIDATE" && record.provenance !== "GOVERNED_LIBRARY")) return null;
+  return { kind: "GOVERNED_TEMPLATE", templateId: record.referencedStableId, immutableVersionId: record.immutableVersionId,
+    displayName: record.displayName, provenance: record.provenance };
+};
+
+/** Applies only a complete, owner-bound, revision-matched authoritative manifest. */
+export function reconcileAuthoritativePlanDependencies(plan: Plan, owner: string, revision: number,
+  records: readonly PlanDraftDependencyRecord[]): Plan {
+  const copy = structuredClone(plan);
+  const placements = copy.weeks.flatMap(week => week.placements);
+  const active = records.filter(record => record.deletedAt == null && record.humanUserId === owner &&
+    record.planId === copy.planId && record.revision === revision);
+  const byPlacement = new Map<string, PlanDraftDependencyRecord[]>();
+  for (const record of active) byPlacement.set(record.placementId, [...(byPlacement.get(record.placementId) ?? []), record]);
+  if (active.length !== placements.length || placements.some(item => (byPlacement.get(item.placementId)?.length ?? 0) !== 1)) return copy;
+  for (const placement of placements) {
+    const record = byPlacement.get(placement.placementId)![0];
+    const dependency = dependencyFromRecord(record);
+    if (!dependency || dependency.kind === "WORKOUT_DRAFT" && dependency.workoutDraftId !== placement.workoutId ||
+      dependency.kind === "PUBLISHED_WORKOUT_VERSION" && dependency.workoutGlobalId !== placement.workoutId ||
+      dependency.kind === "GOVERNED_TEMPLATE" && dependency.templateId !== placement.workoutId) return structuredClone(plan);
+    placement.dependency = dependency;
+  }
+  copy.dependencyOwnerHumanUserId = owner;
+  copy.dependencyKinds = [...new Set(placements.map(item => item.dependency!.kind))].sort();
+  copy.dependencyStorageVersion = 1;
+  copy.dependencyCount = placements.length;
+  return copy;
+}
+
 export function normalizePlanDependencyRecords(plan: Plan, owner: string, revision: number, createdAt: string, updatedAt: string): PlanDraftDependencyRecord[] {
   const records: PlanDraftDependencyRecord[] = [];
   for (const week of plan.weeks) for (const placement of week.placements) {
@@ -96,7 +141,7 @@ export function validateDraftDependencies(plan: Plan, owner: string, drafts: Rea
       if (!dependency.versionId || !dependency.workoutGlobalId || !dependency.checksum || !/^[0-9a-f]{64}$/.test(dependency.checksum)) issues.push({ ...base, state: "INVALID", message: `${base.displayName} has an invalid fixed version.` });
     } else if (!dependency.templateId || !dependency.immutableVersionId) issues.push({ ...base, state: "INVALID", message: `${base.displayName} has an invalid governed template reference.` });
   }
-  return issues;
+  return [...new Map(issues.map(issue => [`${issue.placementId}:${issue.workoutId}:${issue.state}`, issue])).values()];
 }
 
 export function dependencyHasUnpublishedChanges(dependency: PlanDraftDependency | undefined, drafts: ReadonlyMap<string, DraftEnvelope<Workout>>): boolean {

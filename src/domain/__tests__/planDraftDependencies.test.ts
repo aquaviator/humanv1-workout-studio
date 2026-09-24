@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftEnvelope } from '../../repositories/DraftRepository';
 import type { Plan, PlanPlacement, Workout } from '../types';
-import { classifyLegacyDependency, classifyLegacyPlan, dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, STUDIO_PLAN_DRAFT_SCHEMA, validateDraftDependencies, workoutDraftDependency } from '../planDraftDependencies';
+import { classifyLegacyDependency, classifyLegacyPlan, dependencyHasUnpublishedChanges, migrateLegacyPlanDraft, reconcileAuthoritativePlanDependencies, STUDIO_PLAN_DRAFT_SCHEMA, validateDraftDependencies, workoutDraftDependency } from '../planDraftDependencies';
 
 const workout = (id = 'workout-a'): Workout => ({ schemaVersion: 'humanv1.workout/1', workoutId: id, title: 'Strength A', discipline: 'STRENGTH', catalogueReleaseId: 'catalogue-1', tags: [], blocks: [{ blockId: `${id}-block`, type: 'EXERCISE', exerciseId: 'squat', exerciseNameSnapshot: 'Squat', efforts: [{ effortId: `${id}-set`, effortType: 'WORKING', prescriptions: [{ prescriptionId: `${id}-rx`, metricKey: 'repetitions', targetValue: 8 }] }] }] });
 const envelope = (overrides: Partial<DraftEnvelope<Workout>> = {}): DraftEnvelope<Workout> => ({ schemaVersion: 1, globalId: 'workout-a', humanUserId: 'human-1', revision: 1, status: 'DRAFT', payload: workout(), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', deletedAt: null, originClientId: 'web_local_client', ...overrides });
@@ -27,5 +27,31 @@ describe('Studio plan draft dependencies', () => {
     expect(classifyLegacyPlan(planEnvelope, [])).toBe('MISSING_NORMALIZED_DEPENDENCIES');
     expect(classifyLegacyPlan(planEnvelope, [{ ...record, revision: 2 }])).toBe('STALE_DEPENDENCY_REVISION');
     expect(classifyLegacyPlan({ ...planEnvelope, deletedAt: '2026-01-02' }, [record])).toBe('ARCHIVED_LEGACY_PLAN');
+  });
+  it('reconstructs exactly one dependency from a complete authoritative manifest', () => {
+    const source = plan({ ...placement(), dependency: undefined });
+    const record = { schemaVersion: 'humanv1.studio-plan-draft-dependency/1' as const, dependencyId: 'plan-1__placement-1', humanUserId: 'human-1', planId: 'plan-1', placementId: 'placement-1',
+      dependencyKind: 'WORKOUT_DRAFT' as const, referencedStableId: 'workout-a', expectedRevision: 2, expectedUpdatedAt: '2026-01-02T00:00:00Z', immutableVersionId: null,
+      immutableRevision: null, immutableChecksum: null, immutableSchemaVersion: null, displayName: 'Strength A', provenance: 'WORKOUT_STUDIO', revision: 3,
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z', deletedAt: null };
+    const result = reconcileAuthoritativePlanDependencies(source, 'human-1', 3, [record]);
+    expect(result.weeks[0].placements).toHaveLength(1);
+    expect(result.weeks[0].placements[0].dependency).toMatchObject({ kind: 'WORKOUT_DRAFT', workoutDraftId: 'workout-a', expectedRevision: 2 });
+    expect(result.dependencyCount).toBe(1);
+  });
+  it('fails closed for duplicate, cross-owner, stale or mismatched manifests', () => {
+    const source = plan({ ...placement(), dependency: undefined });
+    const record = { schemaVersion: 'humanv1.studio-plan-draft-dependency/1' as const, dependencyId: 'plan-1__placement-1', humanUserId: 'human-1', planId: 'plan-1', placementId: 'placement-1',
+      dependencyKind: 'WORKOUT_DRAFT' as const, referencedStableId: 'workout-a', expectedRevision: 1, expectedUpdatedAt: null, immutableVersionId: null, immutableRevision: null,
+      immutableChecksum: null, immutableSchemaVersion: null, displayName: 'Strength A', provenance: 'WORKOUT_STUDIO', revision: 3, createdAt: '', updatedAt: '', deletedAt: null };
+    expect(reconcileAuthoritativePlanDependencies(source, 'human-1', 3, [record, record])).toEqual(source);
+    expect(reconcileAuthoritativePlanDependencies(source, 'human-1', 3, [{ ...record, humanUserId: 'human-2' }])).toEqual(source);
+    expect(reconcileAuthoritativePlanDependencies(source, 'human-1', 4, [record])).toEqual(source);
+  });
+  it('deduplicates repeated warnings for the same placement but preserves two legitimate placements', () => {
+    const duplicated = { ...plan(), weeks: [{ ...plan().weeks[0], placements: [placement(), placement()] }] };
+    expect(validateDraftDependencies(duplicated, 'human-1', new Map())).toHaveLength(1);
+    const legitimate = { ...plan(), weeks: [{ ...plan().weeks[0], placements: [placement(), placement({ placementId: 'placement-2' })] }] };
+    expect(validateDraftDependencies(legitimate, 'human-1', new Map())).toHaveLength(2);
   });
 });
